@@ -2,14 +2,7 @@ const { app, BrowserWindow } = require("electron");
 const { autoUpdater } = require("electron-updater");
 require('./apiCajon/index.js');
 
-// Define los enlaces correspondientes a cada ejecutable
-const ejecutables = {
-  "TERRONES": "https://terronescolima.com/",
-  "TUNKITOS": "https://tunkitos.terronescolima.com/"
-};
-
-// Función para crear la ventana con el enlace correspondiente
-function createWindow(ejecutable) {
+function createWindow() {
   const win = new BrowserWindow({
     width: 800,
     height: 600,
@@ -19,8 +12,9 @@ function createWindow(ejecutable) {
     kiosk: true,
   });
 
-  win.loadURL(ejecutables[ejecutable]);
+  win.loadURL("https://terronescolima.com/"); // Cambia la URL a https://terronescolima.com/
 
+  // Escuchar eventos de teclado en la ventana
   win.webContents.on("before-input-event", (event, input) => {
     if (input.key === "F12") {
       win.setKiosk(false);
@@ -34,11 +28,9 @@ function createWindow(ejecutable) {
 }
 
 app.whenReady().then(() => {
-  // Aquí puedes especificar qué ejecutable se va a utilizar (por ejemplo, "TERRONES" o "TUNKITOS").
-  const ejecutable = "TERRONES";
+  createWindow();
 
-  createWindow(ejecutable);
-
+  // Configuración de autoUpdater para las actualizaciones automáticas
   autoUpdater.checkForUpdatesAndNotify();
 
   autoUpdater.on('update-downloaded', () => {
@@ -61,10 +53,11 @@ app.on("window-all-closed", () => {
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    // De nuevo, especifica el ejecutable a utilizar aquí.
-    const ejecutable = "TERRONES";
-    createWindow(ejecutable);
+    createWindow();
   }
 });
 
-//electron-packager . MiAplicacion --platform=win32 --arch=x64 --out=./ --overwrite
+
+
+
+//electron-packager . TERRONES --platform=win32 --arch=x64 --out=./ --overwrite

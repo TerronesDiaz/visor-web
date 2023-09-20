@@ -4,9 +4,12 @@
   "description": "programa para abrir el POS en la web",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
-    "pack": "electron-builder --dir",
-    "dist": "electron-builder",
+    "start-terrones": "electron ./TERRONES",
+    "start-tunkitos": "electron ./TUNKITOS",
+    "pack-terrones": "electron-builder --dir ./TERRONES",
+    "pack-tunkitos": "electron-builder --dir ./TUNKITOS",
+    "dist-terrones": "electron-builder ./TERRONES",
+    "dist-tunkitos": "electron-builder ./TUNKITOS",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Francisco Javier Terrones Díaz",
