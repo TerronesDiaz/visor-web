@@ -1,0 +1,33 @@
+{
+  "name": "visor-web",
+  "version": "1.0.1",
+  "description": "programa para abrir el POS en la web",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Francisco Javier Terrones Díaz",
+  "license": "ISC",
+  "build": {
+    "appId": "com.terronesdiaz.visorweb",
+    "publish": [
+      {
+        "provider": "github",
+        "repo": "visor-web",
+        "owner": "TerronesDiaz",
+        "private": false
+      }
+    ]
+  },
+  "devDependencies": {
+    "electron": "^26.2.1",
+    "electron-builder": "^24.6.4",
+    "electron-updater": "^6.1.4"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  }
+}
