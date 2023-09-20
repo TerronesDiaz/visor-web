@@ -1,6 +1,6 @@
-const { app, BrowserWindow } = require("electron");
+const { app, BrowserWindow, dialog } = require("electron");
 const { autoUpdater } = require("electron-updater");
-require('./apiCajon/index.js');
+const packageConfig = require('./package.json');
 
 function createWindow(url) {
   const win = new BrowserWindow({
@@ -27,7 +27,7 @@ function createWindow(url) {
   });
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Configuración de autoUpdater para las actualizaciones automáticas
   autoUpdater.checkForUpdatesAndNotify();
 
@@ -43,8 +43,24 @@ app.whenReady().then(() => {
   });
 
   // Selecciona la URL correcta según la configuración en package.json
-  const packageConfig = require('./package.json');
-  createWindow(packageConfig.appURL);
+  const urls = packageConfig.appURLs;
+  let selectedURL;
+
+  if (urls && urls.length > 1) {
+    const options = {
+      type: 'question',
+      buttons: urls,
+      title: 'Seleccione una URL',
+      message: '¿A cuál URL desea acceder?'
+    };
+
+    const userChoice = await dialog.showMessageBox(options);
+    selectedURL = urls[userChoice.response];
+  } else {
+    selectedURL = urls ? urls[0] : packageConfig.appURL;
+  }
+
+  createWindow(selectedURL);
 });
 
 app.on("window-all-closed", () => {
@@ -55,7 +71,7 @@ app.on("window-all-closed", () => {
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow();
+    createWindow(packageConfig.appURL);
   }
 });
 

@@ -1,12 +1,12 @@
 {
   "name": "visor-web",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Programa para abrir el POS en la web",
   "scripts": {
     "start": "electron main.js",
-    "pack": "electron-builder --dir .",
-    "dist": "electron-builder .",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "electron-builder --dir .",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "instalar": "electron-builder --win"
   },
   "author": "Francisco Javier Terrones Díaz",
   "license": "ISC",
@@ -32,6 +32,8 @@
     "express": "^4.18.2"
   },
   "main": "main.js",
-  "appURL": "https://terronescolima.com/",
-  "appURLTunkitos": "https://tunkitos.terronescolima.com/"
+  "appURLs": [
+    "https://terronescolima.com/",
+    "https://tunkitos.terronescolima.com/"
+  ]
 }
