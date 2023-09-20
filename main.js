@@ -31,13 +31,19 @@ app.whenReady().then(async () => {
   // Configuración de autoUpdater para las actualizaciones automáticas
   autoUpdater.checkForUpdatesAndNotify();
 
-  autoUpdater.on('update-downloaded', () => {
+  autoUpdater.on('update-downloaded', (info) => {
     // Limpia solo el caché.
     const win = BrowserWindow.getFocusedWindow();
     if (win) {
       win.webContents.session.clearCache().then(() => {
-        // Reinicia la aplicación para aplicar la actualización.
-        autoUpdater.quitAndInstall();
+        // Notifica al usuario sobre la nueva versión
+        dialog.showMessageBox({
+          title: 'Actualización descargada',
+          message: `Se ha descargado una nueva actualización. La versión actual es ${info.version}. La aplicación se reiniciará para aplicar los cambios.`
+        }).then(() => {
+          // Reinicia la aplicación para aplicar la actualización.
+          autoUpdater.quitAndInstall();
+        });
       });
     }
   });
@@ -74,9 +80,3 @@ app.on("activate", () => {
     createWindow(packageConfig.appURL);
   }
 });
-
-
-
-
-
-//electron-packager . TERRONES --platform=win32 --arch=x64 --out=./ --overwrite
