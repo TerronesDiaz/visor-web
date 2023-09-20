@@ -2,7 +2,7 @@ const { app, BrowserWindow } = require("electron");
 const { autoUpdater } = require("electron-updater");
 require('./apiCajon/index.js');
 
-function createWindow() {
+function createWindow(url) {
   const win = new BrowserWindow({
     width: 800,
     height: 600,
@@ -12,7 +12,7 @@ function createWindow() {
     kiosk: true,
   });
 
-  win.loadURL("https://tunkitos.terronescolima.com/"); // Cambia la URL a https://terronescolima.com/
+  win.loadURL(url);
 
   // Escuchar eventos de teclado en la ventana
   win.webContents.on("before-input-event", (event, input) => {
@@ -28,8 +28,6 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  createWindow();
-
   // Configuración de autoUpdater para las actualizaciones automáticas
   autoUpdater.checkForUpdatesAndNotify();
 
@@ -43,6 +41,10 @@ app.whenReady().then(() => {
       });
     }
   });
+
+  // Selecciona la URL correcta según la configuración en package.json
+  const packageConfig = require('./package.json');
+  createWindow(packageConfig.appURL);
 });
 
 app.on("window-all-closed", () => {
@@ -58,4 +60,7 @@ app.on("activate", () => {
 });
 
 
-//electron-packager . MiAplicacion --platform=win32 --arch=x64 --out=./ --overwrite
+
+
+
+//electron-packager . TERRONES --platform=win32 --arch=x64 --out=./ --overwrite

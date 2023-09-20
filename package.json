@@ -1,15 +1,11 @@
 {
   "name": "visor-web",
   "version": "1.0.1",
-  "description": "programa para abrir el POS en la web",
-  "main": "main.js",
+  "description": "Programa para abrir el POS en la web",
   "scripts": {
-    "start-terrones": "electron ./TERRONES",
-    "start-tunkitos": "electron ./TUNKITOS",
-    "pack-terrones": "electron-builder --dir ./TERRONES",
-    "pack-tunkitos": "electron-builder --dir ./TUNKITOS",
-    "dist-terrones": "electron-builder ./TERRONES",
-    "dist-tunkitos": "electron-builder ./TUNKITOS",
+    "start": "electron main.js",
+    "pack": "electron-builder --dir .",
+    "dist": "electron-builder .",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Francisco Javier Terrones Díaz",
@@ -31,6 +27,11 @@
     "electron-updater": "^6.1.4"
   },
   "dependencies": {
+    "cors": "^2.8.5",
+    "electron-updater": "^6.1.4",
     "express": "^4.18.2"
-  }
+  },
+  "main": "main.js",
+  "appURL": "https://terronescolima.com/",
+  "appURLTunkitos": "https://tunkitos.terronescolima.com/"
 }

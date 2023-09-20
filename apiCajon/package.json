@@ -11,5 +11,8 @@
   "license": "ISC",
   "dependencies": {
     "cors": "^2.8.5"
+  },
+  "devDependencies": {
+    "electron": "^26.2.1"
   }
 }
