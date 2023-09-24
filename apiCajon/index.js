@@ -11,7 +11,7 @@ app.use(cors());
 app.use('/cajon', cajonRoutes);
 
 app.listen(port, () => {
-  console.log(`API escuchando en http://localhost:${port}`);
+  console.log(`API escuchando en: http://localhost:${port}`);
 });
 
 

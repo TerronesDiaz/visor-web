@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Buscar imagen</title>
+  <link href="../node_modules/bootstrap/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+  <div class="container mt-5">
+    <form id="searchForm" class="d-flex">
+      <input type="search" class="form-control me-2" id="query" placeholder="Escriba su búsqueda aquí" required>
+      <button type="submit" class="btn btn-primary">Buscar</button>
+    </form>
+    <button type="button" id="setDownloadPath" class="btn btn-secondary mt-2">Establecer ruta de descarga</button>
+    <div id="notification" class="mt-2"></div>
+  </div>
+  <script>
+    document.addEventListener("DOMContentLoaded", () => {
+      const { ipcRenderer } = require("electron");
+
+      // Cargar la ruta de descarga previamente seleccionada si existe
+      const savedDownloadPath = localStorage.getItem('downloadPath');
+      if (savedDownloadPath) {
+        ipcRenderer.send("set-download-path", savedDownloadPath);
+      }
+
+      // Escuchar las respuestas del proceso principal
+      ipcRenderer.on("download-success", (event, arg) => {
+        document.getElementById("notification").innerText = "Imagen descargada con éxito.";
+      });
+
+      ipcRenderer.on("download-error", (event, arg) => {
+        document.getElementById("notification").innerText = "Error al descargar la imagen.";
+      });
+
+      document.getElementById("searchForm").addEventListener("submit", function (e) {
+        e.preventDefault();
+        const searchQuery = document.getElementById("query").value;
+        ipcRenderer.send("perform-search", searchQuery);
+      });
+
+      document.getElementById("setDownloadPath").addEventListener("click", function (e) {
+        ipcRenderer.send("select-download-path");
+      });
+    });
+  </script>
+</body>
+</html>

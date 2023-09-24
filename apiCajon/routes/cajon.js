@@ -5,7 +5,7 @@ const router = express.Router();
 router.post('/abrir', (req, res) => {
   try {
     // Aquí el código para abrir el cajón
-    res.json({ error: false, mensaje: 'Cajón abierto con éxito' });
+    res.json({ error: false, mensaje: 'Cajón abierto con éxito!' });
   } catch (err) {
     res.json({ error: true, mensaje: 'Error al abrir el cajón' });
   }
