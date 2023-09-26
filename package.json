@@ -1,6 +1,6 @@
 {
   "name": "visor-web",
-  "version": "1.1.7",
+  "version": "1.1.13",
   "description": "Programa para abrir el POS en la web",
   "scripts": {
     "start": "electron main.js",
@@ -31,6 +31,7 @@
     "electron-updater": "^6.1.4",
     "express": "^4.18.2",
     "puppeteer": "^21.3.4",
+    "sweetalert2": "^11.7.29",
     "winston": "^3.10.0"
   },
   "main": "main.js",

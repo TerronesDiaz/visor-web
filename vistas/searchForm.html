@@ -24,50 +24,83 @@
         Establecer ruta de descarga
       </button>
       <div id="notification" class="mt-2"></div>
+      <p>Presione la tecla <strong>F7</strong> para cerrar esta ventana.</p>
     </div>
     <script>
       document.addEventListener("DOMContentLoaded", () => {
-        const { ipcRenderer } = require("electron");
+        try {
+          const { ipcRenderer } = require("electron");
+          const Swal = require("sweetalert2");
+          console.log("Electron ipcRenderer cargado correctamente.");
 
-        // Cargar la ruta de descarga previamente seleccionada si existe
-        const savedDownloadPath = localStorage.getItem("downloadPath");
-        if (savedDownloadPath) {
-          ipcRenderer.send("set-download-path", savedDownloadPath);
-        }
+          // Cargar la ruta de descarga previamente seleccionada si existe
+          const savedDownloadPath = localStorage.getItem("downloadPath");
+          console.log(`Ruta de descarga guardada: ${savedDownloadPath}`);
 
-        // Escuchar las respuestas del proceso principal
-        ipcRenderer.on("download-success", (event, arg) => {
-          document.getElementById("notification").innerText =
-            "Imagen descargada con éxito.";
-        });
-
-        ipcRenderer.on("download-error", (event, arg) => {
-          document.getElementById("notification").innerText =
-            "Error al descargar la imagen.";
-        });
-
-        document
-          .getElementById("searchForm")
-          .addEventListener("submit", function (e) {
-            e.preventDefault();
-            let searchQuery = document.getElementById("query").value;
-            // Sanitizar la búsqueda
-            searchQuery = searchQuery.replace(/[^a-zA-Z0-9 ]/g, "");
-            ipcRenderer.send("perform-search", searchQuery);
-          });
-
-        document
-          .getElementById("setDownloadPath")
-          .addEventListener("click", function (e) {
-            ipcRenderer.send("select-download-path");
-          });
-
-        // Agregar la función para cerrar la ventana con F7
-        window.addEventListener("keydown", (e) => {
-          if (e.key === "F7") {
-            ipcRenderer.send("close-window");
+          if (savedDownloadPath) {
+            ipcRenderer.send("set-download-path", savedDownloadPath);
           }
-        });
+
+          // Escuchar las respuestas del proceso principal
+          ipcRenderer.on("download-success", (event, arg) => {
+            Swal.close();
+            Swal.fire(
+              "Éxito",
+              "La imagen ha sido descargada con éxito",
+              "success"
+            );
+          });
+
+          ipcRenderer.on("download-error", (event, arg) => {
+            Swal.close();
+            Swal.fire(
+              "Error",
+              "Ha ocurrido un error al descargar la imagen",
+              "error"
+            );
+          });
+
+          document
+            .getElementById("searchForm")
+            .addEventListener("submit", function (e) {
+              e.preventDefault();
+              let searchQuery = document.getElementById("query").value;
+              console.log(`Consulta de búsqueda original: ${searchQuery}`);
+
+              // Sanitizar la búsqueda
+              searchQuery = searchQuery.replace(/[^a-zA-Z0-9 ]/g, "");
+              console.log(`Consulta de búsqueda sanitizada: ${searchQuery}`);
+
+              // Mostrar el modal de carga
+              Swal.fire({
+                title: 'Cargando...',
+                text: 'Por favor espere mientras se realiza la búsqueda y descarga.',
+                allowOutsideClick: false,
+                didOpen: () => {
+                  Swal.showLoading();
+                }
+              });
+
+              ipcRenderer.send("perform-search", searchQuery);
+            });
+
+          document
+            .getElementById("setDownloadPath")
+            .addEventListener("click", function (e) {
+              console.log("Botón setDownloadPath clickeado.");
+              ipcRenderer.send("select-download-path");
+            });
+
+          // Agregar la función para cerrar la ventana con F7
+          window.addEventListener("keydown", (e) => {
+            if (e.key === "F7") {
+              console.log("Tecla F7 presionada. Cerrando ventana.");
+              ipcRenderer.send("close-window");
+            }
+          });
+        } catch (error) {
+          console.error("Ha ocurrido un error:", error);
+        }
       });
     </script>
   </body>

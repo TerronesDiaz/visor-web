@@ -7,77 +7,122 @@ const puppeteer = require("puppeteer");
 const axios = require("axios");
 
 const fsPromises = fs.promises;
-const configPath = './config.json'; // Asegúrese de que esta ruta sea accesible
+const configPath = './config.json';
+let userDownloadPath = '';
+var abierta = false;
 
-let userDownloadPath = ''; // Variable global para almacenar la ruta de descarga del usuario
-
-// Función para cargar la configuración
+// Load configuration at the start
 function loadConfig() {
   try {
     const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
     userDownloadPath = config.downloadPath;
+    console.log(`Config loaded: ${JSON.stringify(config)}`);
   } catch (err) {
-    console.error('Error al cargar la configuración:', err);
+    console.error('Error loading configuration:', err);
     if (err.code === 'ENOENT') {
-      userDownloadPath = app.getPath('downloads'); // Ruta de descargas predeterminada
-      saveConfig(); // Guardar la configuración predeterminada
+      userDownloadPath = app.getPath('downloads');
+      saveConfig();
     }
   }
 }
 
-// Función para guardar la configuración
+// Save configuration
 function saveConfig() {
-  fs.writeFileSync(configPath, JSON.stringify({ downloadPath: userDownloadPath }));
+  try {
+    fs.writeFileSync(configPath, JSON.stringify({ downloadPath: userDownloadPath }));
+    console.log(`Config saved: ${JSON.stringify({ downloadPath: userDownloadPath })}`);
+  } catch (err) {
+    console.error('Error saving configuration:', err);
+  }
 }
 
-// Cargar la configuración al inicio
-loadConfig();
-
+// Fetch image
 async function fetchImage(searchQuery) {
-  const browser = await puppeteer.launch();
-  const page = await browser.newPage();
+  try {
+    const browser = await puppeteer.launch({ headless: "new" });
+    const page = await browser.newPage();
+    await page.goto(`https://www.google.com/search?q=${searchQuery}&tbm=isch`);
+    
+    const imageUrl = await page.evaluate(() => {
+      return document.querySelector(".rg_i")?.src || null;
+    });
+    
+    if (!imageUrl) {
+      console.log('Image URL not found');
+      return 'Image URL not found';
+    }
 
-  await page.goto(`https://www.google.com/search?q=${searchQuery}&tbm=isch`);
-
-  const imageUrl = await page.evaluate(() => {
-    return document.querySelector(".rg_i").src;
-  });
-
-  await browser.close();
-
-  // Descargar la imagen
-  const response = await axios.get(imageUrl, { responseType: "arraybuffer" });
-  await fsPromises.writeFile(`${userDownloadPath}/${searchQuery}.jpg`, response.data, "binary");
-
-  console.log(`Imagen guardada como ${userDownloadPath}/${searchQuery}.jpg`);
+    await browser.close();
+    
+    const response = await axios.get(imageUrl, { responseType: "arraybuffer" });
+    const savePath = `${userDownloadPath}/${searchQuery}.jpg`;
+    await fsPromises.writeFile(savePath, response.data, "binary");
+    
+    console.log(`Image saved at ${savePath}`);
+    return `Image saved at ${savePath}`;
+  } catch (error) {
+    console.error('Error in fetchImage:', error);
+    return `Error in fetchImage: ${error.message}`;
+  }
 }
 
 
 ipcMain.on('select-download-path', async (event, arg) => {
-  const result = await dialog.showOpenDialog({
-    properties: ['openDirectory']
-  });
-
-  if (!result.canceled) {
-    userDownloadPath = result.filePaths[0];
-    saveConfig();
-    event.sender.send("download-path-selected");
+  try {
+    const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
+    
+    if (!result.canceled) {
+      userDownloadPath = result.filePaths[0];
+      saveConfig();
+      event.sender.send("download-path-selected", userDownloadPath);
+      console.log(`Download path set to: ${userDownloadPath}`);
+    }
+  } catch (error) {
+    console.error('Error in select-download-path:', error);
   }
 });
 
 ipcMain.on('set-download-path', (event, path) => {
-  userDownloadPath = path;
-  saveConfig();
-});
-
-ipcMain.on('perform-search', async (event, searchQuery) => {
   try {
-    await fetchImage(searchQuery);
-    event.sender.send("download-success");
+    userDownloadPath = path;
+    saveConfig();
+    event.sender.send("download-path-set", userDownloadPath);
+    console.log(`Download path manually set to: ${userDownloadPath}`);
   } catch (error) {
-    event.sender.send("download-error");
+    console.error('Error in set-download-path:', error);
   }
 });
+
+// Perform search
+ipcMain.on('perform-search', async (event, searchQuery) => {
+  console.log(`Performing search for: ${searchQuery}`);
+  try {
+    await fetchImage(searchQuery);
+    event.sender.send("download-success", "Image successfully downloaded.");
+  } catch (error) {
+    console.error('Error in perform-search:', error);
+    event.sender.send("download-error", "Error downloading image.");
+  }
+});
+
+// Load config at the beginning
+loadConfig();
+
+
+
+ipcMain.on('close-window', (event, arg) => {
+  const win = BrowserWindow.getFocusedWindow();
+
+  // Agregar un temporizador de 1 segundo (1000 milisegundos)
+  setTimeout(() => {
+    // Establecer abierta = false después del retraso
+    abierta = false;
+    
+    // Cerrar la ventana
+    win.close();
+  }, 1000); // Cambia el valor (en milisegundos) según tus necesidades
+});
+
 
 
 
@@ -135,8 +180,6 @@ function createWindow(url) {
       });
   });
 
-  let searchWin = null; // Mantener una referencia a la ventana de búsqueda
-
   win.webContents.on("before-input-event", (event, input) => {
     logger.info("Evento de entrada detectado:", input.key);
 
@@ -154,15 +197,15 @@ function createWindow(url) {
     if (input.key === "F7") {
       logger.info("Tecla F7 presionada.");
 
-      if (searchWin && !searchWin.isDestroyed()) {
+      if (abierta) {
         logger.info("Cerrando ventana de búsqueda...");
         searchWin.close();
-        searchWin = null;
-      } else {
+        abierta = false;
+      } else if (!abierta) {
         logger.info("Abriendo ventana de búsqueda...");
         searchWin = new BrowserWindow({
-          width: 400,
-          height: 200,
+          width: 800,
+          height: 600,
           webPreferences: {
             nodeIntegration: true,
             contextIsolation: false, // No recomendado desde un punto de vista de seguridad
@@ -170,8 +213,7 @@ function createWindow(url) {
           },
         });
 
-        // Abre DevTools automáticamente si es necesario
-        searchWin.webContents.openDevTools();
+
 
         searchWin
           .loadFile("./vistas/searchForm.html") // Asegúrate de que esta ruta sea correcta
