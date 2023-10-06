@@ -5,6 +5,27 @@ const winston = require("winston");
 const fs = require("fs");
 const puppeteer = require("puppeteer");
 const axios = require("axios");
+const { spawn } = require("child_process");
+
+
+const { start } = require('./apiCajon/index');
+
+function runPythonScript() {
+  const pythonProcess = spawn("python", ["./python-print/imprimir.py"]);
+  
+  pythonProcess.stdout.on("data", (data) => {
+    console.log(`stdout: ${data}`);
+  });
+
+  pythonProcess.stderr.on("data", (data) => {
+    console.error(`stderr: ${data}`);
+  });
+
+  pythonProcess.on("close", (code) => {
+    console.log(`child process exited with code ${code}`);
+  });
+}
+
 
 const fsPromises = fs.promises;
 const configPath = './config.json';
@@ -37,32 +58,52 @@ function saveConfig() {
 }
 
 // Fetch image
+// Variable para rastrear si una búsqueda está en curso
+let isSearchInProgress = false;
+
 async function fetchImage(searchQuery) {
+  if (isSearchInProgress) {
+    return 'Another search is in progress';
+  }
+  
+  isSearchInProgress = true;
+
   try {
-    const browser = await puppeteer.launch({ headless: "new" });
-    const page = await browser.newPage();
-    await page.goto(`https://www.google.com/search?q=${searchQuery}&tbm=isch`);
-    
-    const imageUrl = await page.evaluate(() => {
-      return document.querySelector(".rg_i")?.src || null;
+    // Establecer un tiempo límite para la búsqueda
+    const timeout = new Promise((resolve, reject) => {
+      setTimeout(() => reject('Search timed out'), 10000); // 10 segundos
     });
     
-    if (!imageUrl) {
-      console.log('Image URL not found');
-      return 'Image URL not found';
-    }
+    const search = (async () => {
+      const browser = await puppeteer.launch({ headless: "new" });
+      const page = await browser.newPage();
+      await page.goto(`https://www.google.com/search?q=${searchQuery}&tbm=isch`);
+      
+      const imageUrl = await page.evaluate(() => {
+        return document.querySelector(".rg_i")?.src || null;
+      });
 
-    await browser.close();
-    
-    const response = await axios.get(imageUrl, { responseType: "arraybuffer" });
-    const savePath = `${userDownloadPath}/${searchQuery}.jpg`;
-    await fsPromises.writeFile(savePath, response.data, "binary");
-    
-    console.log(`Image saved at ${savePath}`);
-    return `Image saved at ${savePath}`;
+      await browser.close();
+
+      if (!imageUrl) {
+        return 'Image URL not found';
+      }
+
+      const response = await axios.get(imageUrl, { responseType: "arraybuffer" });
+      const savePath = `${userDownloadPath}/${searchQuery}.jpg`;
+      await fsPromises.writeFile(savePath, response.data, "binary");
+
+      return `Image saved at ${savePath}`;
+    })();
+
+    const result = await Promise.race([timeout, search]);
+    return result;
+
   } catch (error) {
     console.error('Error in fetchImage:', error);
     return `Error in fetchImage: ${error.message}`;
+  } finally {
+    isSearchInProgress = false;
   }
 }
 
@@ -107,7 +148,7 @@ ipcMain.on('perform-search', async (event, searchQuery) => {
 
 // Load config at the beginning
 loadConfig();
-
+runPythonScript();
 
 
 ipcMain.on('close-window', (event, arg) => {
@@ -235,8 +276,8 @@ function createWindow(url) {
 }
 
 app.whenReady().then(async () => {
+  start(); 
   logger.info("Aplicación lista. Inicializando autoUpdater.");
-
   autoUpdater.autoDownload = true; // Activa la descarga automática de actualizaciones
   autoUpdater.checkForUpdatesAndNotify();
 
