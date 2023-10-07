@@ -6,25 +6,48 @@ const fs = require("fs");
 const puppeteer = require("puppeteer");
 const axios = require("axios");
 const { spawn } = require("child_process");
+const path = require('path');
 
 
 const { start } = require('./apiCajon/index');
 
 function runPythonScript() {
-  const pythonProcess = spawn("python", ["./python-print/imprimir.py"]);
-  
+  // Construir la ruta absoluta al script de Python
+  const scriptPath = path.join(process.resourcesPath, 'app.asar.unpacked', 'python-print', 'imprimir.py');
+
+  // Ruta absoluta donde se encuentra la imagen
+  const imagePath = path.join(process.resourcesPath, 'app.asar.unpacked', 'python-print', 'media', 'img', 'terronescolima-logo.png');
+
+
+  // Listar los archivos en la carpeta 'python-print'
+  fs.readdir(path.join(__dirname, 'python-print'), (err, files) => {
+    if (err) {
+      logger.error('Error listing files:', err);
+    } else {
+      logger.info('Files in python-print:', files);
+    }
+  });
+
+  // Ejecutar el script de Python y pasar imagePath como argumento
+  const pythonProcess = spawn("python", [scriptPath, imagePath]);
+
   pythonProcess.stdout.on("data", (data) => {
     console.log(`stdout: ${data}`);
+    logger.info(`stdout: ${data}`);
   });
 
   pythonProcess.stderr.on("data", (data) => {
     console.error(`stderr: ${data}`);
+    logger.error(`stderr: ${data}`);
+    logger.info(`Current directory: ${process.cwd()}`);
   });
 
   pythonProcess.on("close", (code) => {
     console.log(`child process exited with code ${code}`);
+    logger.info(`child process exited with code ${code}`);
   });
 }
+
 
 
 const fsPromises = fs.promises;
@@ -249,7 +272,7 @@ function createWindow(url) {
           height: 600,
           webPreferences: {
             nodeIntegration: true,
-            contextIsolation: false, // No recomendado desde un punto de vista de seguridad
+            contextIsolation: false, 
             sandbox: false, // Desactiva el modo sandbox
           },
         });
@@ -257,7 +280,7 @@ function createWindow(url) {
 
 
         searchWin
-          .loadFile("./vistas/searchForm.html") // Asegúrate de que esta ruta sea correcta
+          .loadFile("./vistas/searchForm.html") 
           .then(() => {
             logger.info("Archivo HTML cargado exitosamente.");
           })

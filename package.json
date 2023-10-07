@@ -1,6 +1,6 @@
 {
   "name": "visor-web",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Programa para abrir el POS en la web",
   "scripts": {
     "start": "electron main.js",
@@ -17,8 +17,22 @@
         "provider": "generic",
         "url": "https://terronescolima.com/lanzamientos/"
       }
+    ],
+    "files": [
+      "main.js",
+      "./python-print/**/*",
+      "./node_modules/**/*",
+      "./apiCajon/**/*",
+      "./vistas/**/*",
+      "libusb-1.0.dll",
+      "package.json",
+      "package-lock.json"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "python-print/**"
     ]
-  },
+  },  
   "devDependencies": {
     "@electron/rebuild": "^3.3.0",
     "electron": "^26.2.1",
@@ -40,6 +54,7 @@
   "main": "main.js",
   "appURLs": [
     "https://terronescolima.com/",
-    "https://tunkitos.terronescolima.com/"
+    "https://tunkitos.terronescolima.com/",
+    "http://localhost:8080/listar_productos.php"
   ]
 }

@@ -4,6 +4,7 @@ from flask import Flask, request, jsonify
 from flask_cors import CORS  # Importa flask_cors
 import unicodedata
 from PIL import Image
+import sys
 def quitar_acentos(texto):
     return ''.join((c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn'))
 
@@ -107,7 +108,7 @@ def print_receipt(data):
         win32print.StartPagePrinter(handle)
 
         try:
-            logo_path = "./media/img/terronescolima-logo.png"
+            logo_path = sys.argv[1]  # Aquí se almacena la ruta absoluta de la imagen
             logo_bytes = convert_image_to_bytes(logo_path)
             win32print.WritePrinter(handle, logo_bytes)
         except FileNotFoundError:
@@ -242,4 +243,4 @@ def imprimir():
         return jsonify(error=True, mensaje=f'Error inesperado: {str(e)}'), HTTP_STATUS_SERVER_ERROR
 
 if __name__ == '__main__':
-    app.run(host='localhost', port=3001, debug=True)
+    app.run(host='localhost', port=3001, debug=False)
