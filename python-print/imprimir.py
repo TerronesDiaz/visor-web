@@ -1,10 +1,13 @@
 import win32print
+import win32api
+import logging
 import json
 from flask import Flask, request, jsonify
 from flask_cors import CORS  # Importa flask_cors
 import unicodedata
 from PIL import Image
 import sys
+import datetime
 def quitar_acentos(texto):
     return ''.join((c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn'))
 
@@ -98,8 +101,44 @@ def convert_image_to_bytes(image_path, paper_width=576):  # Actualice el ancho d
     return bytes(image_bytes)
 
 
+def validar_datos(data):
+    # Verificar que los datos no estén vacíos
+    if not data:
+        return False, "Datos de impresión vacíos o no proporcionados."
 
+    # Verificar la existencia de campos clave
+    campos_requeridos = ['otros_datos', 'productos', 'totales', 'metodoPago']
+    for campo in campos_requeridos:
+        if campo not in data:
+            return False, f"Falta el campo {campo}"
 
+    # Validar el campo 'otros_datos'
+    otros_datos_requeridos = ['id_venta', 'numeroCaja', 'cajero', 'cliente', 'fechaHora']
+    for campo in otros_datos_requeridos:
+        if campo not in data['otros_datos']:
+            return False, f"Falta el campo {campo} en otros_datos"
+
+    # Validar el campo 'productos'
+    if not data['productos']:
+        return False, "La lista de productos está vacía."
+    for producto in data['productos']:
+        if 'descripcion' not in producto or 'cantidad' not in producto or 'importe' not in producto:
+            return False, "Falta algún campo en la lista de productos."
+
+    # Validar el campo 'totales'
+    totales_requeridos = ['noPiezas', 'total']
+    for campo in totales_requeridos:
+        if campo not in data['totales']:
+            return False, f"Falta el campo {campo} en totales"
+
+    # Validar el campo 'metodoPago'
+    if not data['metodoPago']:
+        return False, "La lista de métodos de pago está vacía."
+    for pago in data['metodoPago']:
+        if 'metodoPago' not in pago or 'importe' not in pago:
+            return False, "Falta algún campo en la lista de métodos de pago."
+
+    return True, "Datos válidos"
 def print_receipt(data):
     try:
         printer_name = win32print.GetDefaultPrinter()
@@ -206,7 +245,11 @@ def print_receipt(data):
                 extra_space = "\n"  # Añade tantos saltos de línea como desees
                 win32print.WritePrinter(handle, extra_space.encode('utf-8'))
 
-
+        # Si existe data.concepto y no está vacío ni es null, lo imprimimos
+        if 'concepto' in data and data['concepto']:
+            concepto_text = f"CONCEPTO: {data['concepto']}\n"
+            win32print.WritePrinter(handle, concepto_text.encode('utf-8'))  # Codifica en UTF-8
+            
 
 
         extra_space = "\n" * 10  # Ajusta el número según tus necesidades
@@ -221,6 +264,184 @@ def print_receipt(data):
     except Exception as e:
         raise e
 
+# Configura el sistema de registro
+logging.basicConfig(filename='error_log_python.txt', level=logging.ERROR, format='%(asctime)s - %(message)s')
+
+def validate_cashier_cut_data(data):
+    try:
+        required_fields = [
+            'tipo_corte', 
+            'id_corte', 
+            'id_caja', 
+            'id_cajero', 
+            'nombre_cajero', 
+            'fecha_corte', 
+            'hora_corte',
+            'sumas_generales',
+            'sumas_por_forma_pago',
+            'saldo_inicial'
+        ]
+        
+        # Verifica que todos los campos requeridos existan
+        for field in required_fields:
+            if field not in data:
+                logging.error(f"Campo requerido '{field}' no encontrado en los datos.")
+                return {'error': True, 'mensaje': f"Campo requerido '{field}' no encontrado en los datos."}
+        
+        # Intenta corregir el tipo de los campos numéricos
+        for field in ['id_corte', 'id_caja', 'id_cajero', 'saldo_inicial']:
+            try:
+                data[field] = int(data[field])
+            except ValueError:
+                logging.error(f"Campo '{field}' no puede ser convertido a entero.")
+                return {'error': True, 'mensaje': f"Campo '{field}' no puede ser convertido a entero."}
+            
+        # Intenta normalizar el formato de la fecha y la hora
+        try:
+            fecha_dt = datetime.datetime.strptime(data['fecha_corte'], '%Y-%m-%d')
+            data['fecha_corte'] = fecha_dt.strftime('%d-%m-%Y')
+        except ValueError:
+            try:
+                fecha_dt = datetime.datetime.strptime(data['fecha_corte'], '%d-%m-%Y')
+                data['fecha_corte'] = fecha_dt.strftime('%d-%m-%Y')
+            except ValueError:
+                logging.error("Formato de fecha incorrecto. No se puede transformar a DD-MM-YYYY.")
+                return {'error': True, 'mensaje': "Formato de fecha incorrecto. No se puede transformar a DD-MM-YYYY."}
+        
+        try:
+            hora_dt = datetime.datetime.strptime(data['hora_corte'], '%H:%M')
+            data['hora_corte'] = hora_dt.strftime('%I:%M %p')
+        except ValueError:
+            try:
+                hora_dt = datetime.datetime.strptime(data['hora_corte'], '%I:%M %p')
+                data['hora_corte'] = hora_dt.strftime('%I:%M %p')
+            except ValueError:
+                logging.error("Formato de hora incorrecto. No se puede transformar a formato de 12 horas.")
+                return {'error': True, 'mensaje': "Formato de hora incorrecto. No se puede transformar a formato de 12 horas."}
+            
+        # Verifica que sumas_generales tenga los campos necesarios
+        sumas_generales_fields = ['subtotal', 'descuento', 'iva', 'ieps', 'total']
+        for field in sumas_generales_fields:
+            if field not in data['sumas_generales']:
+                logging.error(f"Campo requerido 'sumas_generales.{field}' no encontrado en los datos.")
+                return {'error': True, 'mensaje': f"Campo requerido 'sumas_generales.{field}' no encontrado en los datos."}
+        
+        # Verifica que cada objeto en sumas_por_forma_pago tenga los campos necesarios
+        forma_pago_fields = ['nombre_forma_pago', 'suma_total', 'suma_iva', 'suma_ieps']
+        for forma_pago in data['sumas_por_forma_pago']:
+            for field in forma_pago_fields:
+                if field not in forma_pago:
+                    logging.error(f"Campo requerido 'sumas_por_forma_pago.{field}' no encontrado en los datos.")
+                    return {'error': True, 'mensaje': f"Campo requerido 'sumas_por_forma_pago.{field}' no encontrado en los datos."}
+        
+        logging.info("Validación exitosa")
+        return {'error': False, 'mensaje': 'Validación exitosa'}
+    except Exception as e:
+        logging.error(f'Error desconocido: {str(e)}')
+        return {'error': True, 'mensaje': f'Error desconocido en la validación de corte: {str(e)}'}
+
+def print_cashier_cut(data):
+    try:
+        printer_name = win32print.GetDefaultPrinter()
+        handle = win32print.OpenPrinter(printer_name)
+        job_id = win32print.StartDocPrinter(handle, 1, ("Python_Print_Job", None, "RAW"))
+        win32print.StartPagePrinter(handle)
+        font_large_bold = b'\x1B\x21\x00'
+        font_normal = b'\x1B\x21\x00'
+        logo_path = sys.argv[1]
+        logo_bytes = convert_image_to_bytes(logo_path)
+        win32print.WritePrinter(handle, logo_bytes)
+    except FileNotFoundError:
+        logging.error("Excepción: FileNotFoundError")
+    except Exception as e:
+        logging.error(f"Error desconocido al manejar el logo: {e}")
+        return {'error': True, 'mensaje': str(e)}
+
+    try:
+        header = (
+            f"\n{'SUCESORES DE DONACIANO TERRONES SERRANO, S.A. DE C.V.'.center(40)}\n"
+            f"{'DOMICILIO: PINO SUAREZ #72 COLIMA, COL.'.center(40)}\n"
+            f"{'TELEFONO: 3123133162'.center(40)}\n"
+            f"{'RFC: STD-900718-8C5'.center(40)}\n"
+            f"{'------------------------------------------------'.center(40)}\n"
+            f"{'CORTE DE CAJA':<20}\n"
+            f"{'TIPO DE CORTE: ' + data['tipo_corte']}\n"
+            f"{'ID_CORTE: ' + str(data['id_corte'])}\n"
+            f"{'ID CAJA: ' + str(data['id_caja'])}\n"
+            f"{'ID CAJERO: ' + str(data['id_cajero'])}\n"
+            f"{'CAJERO: ' + data['nombre_cajero']}\n"
+            f"{'FECHA: ' + data['fecha_corte']}\n"
+            f"{'HORA: ' + data['hora_corte']}\n"
+            f"{'------------------------------------------------'.center(40)}\n"
+        )
+        win32print.WritePrinter(handle, header.encode('utf-8'))
+    except Exception as e:
+        logging.error(f"Error al imprimir el encabezado: {e}")
+        return {'error': True, 'mensaje': str(e)}
+
+    try:
+        accumulated_total = 0
+        for forma_pago in data['sumas_por_forma_pago']:
+            forma_pago_total = forma_pago['suma_total']
+            accumulated_total += float(forma_pago_total)
+            nombre_sin_acentos = quitar_acentos(forma_pago['nombre_forma_pago'])
+            forma_pago_text = (
+                font_large_bold +
+                f"{nombre_sin_acentos.upper().center(40)}\n".encode('utf-8') +
+                font_normal +
+                f"{'IEPS: ':<15}${forma_pago['suma_ieps']:>15}\n"
+                f"{'IVA: ':<15}${forma_pago['suma_iva']:>15}\n".encode('utf-8') +
+                font_large_bold +
+                f"{'TOTAL: ':<15}${forma_pago_total:>15} +   ${accumulated_total:>15}\n".encode('utf-8') +
+                font_normal +
+                f"{'------------------------------------------------'.center(40)}\n".encode('utf-8')
+            )
+            win32print.WritePrinter(handle, forma_pago_text)
+    except Exception as e:
+        logging.error(f"Error al imprimir sumas por forma de pago: {e}")
+        return {'error': True, 'mensaje': str(e)}
+
+    try:
+        sumas_generales = (
+            font_large_bold +
+            f"{'TOTAL'.center(40)}\n".encode('utf-8') +
+            font_normal +
+            f"{'IEPS_TOTAL: ':<20}${data['sumas_generales']['ieps']:>20}\n".encode('utf-8') +
+            f"{'IVA_TOTAL: ':<20}${data['sumas_generales']['iva']:>20}\n".encode('utf-8') +
+            f"{'TOTAL CORTE: ':<20}${data['sumas_generales']['total']:>20}\n".encode('utf-8') +
+            f"{'------------------------------------------------'.center(40)}\n".encode('utf-8') +
+            f"{'SALDO INICIAL: ':<20}${data['saldo_inicial']:>20}\n".encode('utf-8') +
+            font_large_bold +
+            f"{'TOTAL CORTE + SALDO INICIAL: ':<20}${data['sumas_generales']['total'] + data['saldo_inicial']:>20}\n".encode('utf-8') +
+            font_normal +
+            f"{'------------------------------------------------'.center(40)}\n".encode('utf-8')
+        )
+        win32print.WritePrinter(handle, sumas_generales)
+    except Exception as e:
+        logging.error(f"Error al imprimir sumas generales: {e}")
+        return {'error': True, 'mensaje': str(e)}
+
+    try:
+        extra_space = "\n" * 10
+        win32print.WritePrinter(handle, extra_space.encode('utf-8'))
+        cut_paper_command = b"\x1D\x56\x00"
+        win32print.WritePrinter(handle, cut_paper_command)
+    except Exception as e:
+        logging.error(f"Error al imprimir el espacio extra o cortar el papel: {e}")
+        return {'error': True, 'mensaje': str(e)}
+
+    try:
+        win32print.EndPagePrinter(handle)
+        win32print.EndDocPrinter(handle)
+        win32print.ClosePrinter(handle)
+    except Exception as e:
+        logging.error(f"Error al finalizar el trabajo de impresión: {e}")
+        return {'error': True, 'mensaje': str(e)}
+
+    return {'error': False, 'mensaje': 'Impresión completada con éxito'}
+
+
+#Función para imprimir un ticket de venta	
 
 @app.route('/imprimir', methods=['POST'])
 def imprimir():
@@ -229,7 +450,24 @@ def imprimir():
         if not data:
             raise ValueError("Datos de impresión vacíos o no proporcionados.")
         
+        valido, mensaje = validar_datos(data)
+        if not valido:
+           raise ValueError(mensaje)
+        
         print_receipt(data)
+
+        #Si existe una propiedad data.openDrawer y es true, se abre el cajón
+        if 'openDrawer' in data and data['openDrawer']:
+            printer_name = win32print.GetDefaultPrinter()
+            handle = win32print.OpenPrinter(printer_name)
+            open_drawer_command = b'\x1B\x70\x00\x19\xFA'  # Este comando es específico para ciertos modelos de Epson
+            win32print.StartDocPrinter(handle, 1, ("Python_Print_Job", None, "RAW"))
+            win32print.StartPagePrinter(handle)
+            win32print.WritePrinter(handle, open_drawer_command)
+            win32print.EndPagePrinter(handle)
+            win32print.EndDocPrinter(handle)
+            win32print.ClosePrinter(handle)
+
         return jsonify(error=False, mensaje='Impresión completada'), HTTP_STATUS_OK
 
     except ValueError as ve:
@@ -240,7 +478,78 @@ def imprimir():
         return jsonify(error=True, mensaje=f'Error de impresión: {str(wp)}'), HTTP_STATUS_SERVER_ERROR
     except Exception as e:
         # Otros errores inesperados
-        return jsonify(error=True, mensaje=f'Error inesperado: {str(e)}'), HTTP_STATUS_SERVER_ERROR
+        return jsonify(error=True, mensaje=f'Error inesperado i: {str(e)}'), HTTP_STATUS_SERVER_ERROR
 
+#Función para abrir el cajón de dinero
+@app.route('/abrirCajon', methods=['POST'])
+def abrirCajon():
+    try:
+        data = request.json
+        if not data or 'openDrawer' not in data or not data['openDrawer']:
+            return jsonify(error=True, mensaje='Parámetro openDrawer no proporcionado o falso'), HTTP_STATUS_SERVER_ERROR
+        
+        # Obtener el nombre de la impresora predeterminada
+        printer_name = win32print.GetDefaultPrinter()
+        # Abrir la impresora
+        handle = win32print.OpenPrinter(printer_name)
+        # Comando para abrir el cajón. Específico para ciertos modelos de Epson.
+        open_drawer_command = b'\x1B\x70\x00\x19\xFA'
+        # Iniciar un nuevo trabajo de impresión
+        win32print.StartDocPrinter(handle, 1, ("Python_Drawer_Open_Job", None, "RAW"))
+        # Iniciar una nueva página
+        win32print.StartPagePrinter(handle)
+        # Enviar el comando para abrir el cajón
+        win32print.WritePrinter(handle, open_drawer_command)
+        # Finalizar la página
+        win32print.EndPagePrinter(handle)
+        # Finalizar el trabajo de impresión
+        win32print.EndDocPrinter(handle)
+        # Cerrar la impresora
+        win32print.ClosePrinter(handle)
+        return jsonify(error=False, mensaje='Cajón abierto con éxito'), HTTP_STATUS_OK
+    except win32print.error as wp:
+        return jsonify(error=True, mensaje=f'Error al abrir el cajón: {str(wp)}'), HTTP_STATUS_SERVER_ERROR
+    except Exception as e:
+        return jsonify(error=True, mensaje=f'Error inesperado ac: {str(e)}'), HTTP_STATUS_SERVER_ERROR
+
+@app.route('/imprimirCorte', methods=['POST'])
+def imprimirCorte():
+    handle = None
+    try:
+        data = request.json
+        if not data:
+            raise ValueError("Datos de impresión vacíos o no proporcionados.")
+        
+        validation_result = validate_cashier_cut_data(data)  # Almacena el resultado de la validación
+        
+        if validation_result['error']:
+            return jsonify(error=True, mensaje=validation_result['mensaje']), HTTP_STATUS_SERVER_ERROR
+        
+        # Continúa con la impresión solo si no hay errores de validación
+        print_result = print_cashier_cut(data)
+        if print_result['error']:
+            return jsonify(error=True, mensaje=print_result['mensaje']), HTTP_STATUS_SERVER_ERROR
+
+        if 'openDrawer' in data and data['openDrawer']:
+            printer_name = win32print.GetDefaultPrinter()
+            handle = win32print.OpenPrinter(printer_name)
+            open_drawer_command = b'\x1B\x70\x00\x19\xFA'
+            win32print.StartDocPrinter(handle, 1, ("Python_Print_Job", None, "RAW"))
+            win32print.StartPagePrinter(handle)
+            win32print.WritePrinter(handle, open_drawer_command)
+            win32print.EndPagePrinter(handle)
+            win32print.EndDocPrinter(handle)
+
+        return jsonify(error=False, mensaje='Impresión completada'), HTTP_STATUS_OK
+
+    except ValueError as ve:
+        # Errores de valor o formato
+        return jsonify(error=True, mensaje=f'Error de validación: {str(ve)}'), HTTP_STATUS_SERVER_ERROR
+    except Exception as e:  # Captura cualquier otra excepción aquí
+        # Errores relacionados con la impresión u otros errores inesperados
+        return jsonify(error=True, mensaje=f'Error inesperado ic: {str(e)}'), HTTP_STATUS_SERVER_ERROR
+    finally:
+        if handle:
+            win32print.ClosePrinter(handle)
 if __name__ == '__main__':
     app.run(host='localhost', port=3001, debug=False)
