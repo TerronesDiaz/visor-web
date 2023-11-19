@@ -153,11 +153,23 @@ def print_receipt(data):
         except FileNotFoundError:
             pass
 
+        # Si esDevolucion es true, se imprime "DEVOLUCION" en negritas y en letras grandes
+        if 'esDevolucion' in data and data['esDevolucion']:
+            bold_on = b'\x1B\x45\x01'
+            bold_off = b'\x1B\x45\x00'
+            extra_space = "\n" * 2
+            win32print.WritePrinter(handle, bold_on)
+            win32print.WritePrinter(handle, extra_space.encode('utf-8'))
+            win32print.WritePrinter(handle, "DEVOLUCIÓN\n".encode('utf-8'))
+            win32print.WritePrinter(handle, extra_space.encode('utf-8'))
+            win32print.WritePrinter(handle, bold_off)
+
+
         header = (
-            f"\n{'SUCESORES DE DONACIANO TERRONES SERRANO, S.A. DE C.V.'.center(40)}\n"
-            f"{'DOMICILIO: PINO SUAREZ #72 COLIMA, COL.'.center(40)}\n"
-            f"{'TELEFONO: 3123133162'.center(40)}\n"
-            f"{'RFC: STD-900718-8C5'.center(40)}\n"
+            f"\n{'FRANCISCO JAVIER TERRONES SUÁREZ.'.center(40)}\n"
+            f"{'DOMICILIO: TORRES QUINTERO 433A, COL. FATIMA, COLIMA, COLIMA.'.center(40)}\n"
+            f"{'TELEFONO: 3121661184'.center(40)}\n"
+            f"{'RFC: TESF680808SX6'.center(40)}\n"
             f"{'------------------------------------------------'.center(40)}\n"
             f"{'FOLIO: ' + data['otros_datos']['id_venta']}\n"
             f"{'CAJA: ' + data['otros_datos']['numeroCaja']}\n"
@@ -342,27 +354,34 @@ def validate_cashier_cut_data(data):
 
 def print_cashier_cut(data):
     try:
+        # Configuración inicial de la impresora
         printer_name = win32print.GetDefaultPrinter()
         handle = win32print.OpenPrinter(printer_name)
         job_id = win32print.StartDocPrinter(handle, 1, ("Python_Print_Job", None, "RAW"))
         win32print.StartPagePrinter(handle)
+
+        # Configuración de fuentes
         font_large_bold = b'\x1B\x21\x00'
         font_normal = b'\x1B\x21\x00'
+
+        # Imprimir logo
         logo_path = sys.argv[1]
         logo_bytes = convert_image_to_bytes(logo_path)
         win32print.WritePrinter(handle, logo_bytes)
     except FileNotFoundError:
         logging.error("Excepción: FileNotFoundError")
+        return {'error': True, 'mensaje': 'Archivo no encontrado'}
     except Exception as e:
         logging.error(f"Error desconocido al manejar el logo: {e}")
         return {'error': True, 'mensaje': str(e)}
 
     try:
+        # Impresión del encabezado
         header = (
-            f"\n{'SUCESORES DE DONACIANO TERRONES SERRANO, S.A. DE C.V.'.center(40)}\n"
-            f"{'DOMICILIO: PINO SUAREZ #72 COLIMA, COL.'.center(40)}\n"
-            f"{'TELEFONO: 3123133162'.center(40)}\n"
-            f"{'RFC: STD-900718-8C5'.center(40)}\n"
+            f"\n{'FRANCISCO JAVIER TERRONES SUAREZ'.center(40)}\n"
+            f"{'DOMICILIO: TORRES QUINTERO 433A, COL. FATIMA, COLIMA, COLIMA.'.center(40)}\n"
+            f"{'TELEFONO: 3121661184'.center(40)}\n"
+            f"{'RFC: TESF680808SX6'.center(40)}\n"
             f"{'------------------------------------------------'.center(40)}\n"
             f"{'CORTE DE CAJA':<20}\n"
             f"{'TIPO DE CORTE: ' + data['tipo_corte']}\n"
@@ -380,6 +399,7 @@ def print_cashier_cut(data):
         return {'error': True, 'mensaje': str(e)}
 
     try:
+        # Impresión de sumas por forma de pago
         accumulated_total = 0
         for forma_pago in data['sumas_por_forma_pago']:
             forma_pago_total = forma_pago['suma_total']
@@ -402,6 +422,7 @@ def print_cashier_cut(data):
         return {'error': True, 'mensaje': str(e)}
 
     try:
+        # Impresión de sumas generales
         sumas_generales = (
             font_large_bold +
             f"{'TOTAL'.center(40)}\n".encode('utf-8') +
@@ -422,15 +443,45 @@ def print_cashier_cut(data):
         return {'error': True, 'mensaje': str(e)}
 
     try:
+        # Impresión de sumas de devoluciones
+        sumas_devoluciones = (
+            font_large_bold +
+            f"\n{'DEVOLUCIONES'.center(40)}\n".encode('utf-8') +
+            font_normal +
+            f"{'SUBTOTAL DEVOLUCIONES: ':<20}${data['sumas_devoluciones']['subtotal']:>20}\n".encode('utf-8') +
+            f"{'IVA DEVOLUCIONES: ':<20}${data['sumas_devoluciones']['iva']:>20}\n".encode('utf-8') +
+            f"{'IEPS DEVOLUCIONES: ':<20}${data['sumas_devoluciones']['ieps']:>20}\n".encode('utf-8') +
+            f"{'TOTAL DEVOLUCIONES: ':<20}${data['sumas_devoluciones']['total']:>20}\n".encode('utf-8') +
+            f"{'------------------------------------------------'.center(40)}\n".encode('utf-8')
+        )
+        win32print.WritePrinter(handle, sumas_devoluciones)
+    except Exception as e:
+        logging.error(f"Error al imprimir sumas de devoluciones: {e}")
+        return {'error': True, 'mensaje': str(e)}
+
+    try:
+        # Impresión de sumas totales (generales - devoluciones)
+        sumas_totales = (
+            font_large_bold +
+            f"\n{'TOTAL VENTA - DEVOLUCIONES'.center(40)}\n".encode('utf-8') +
+            font_normal +
+            f"{'SUBTOTAL: ':<20}${data['sumas_totales']['subtotal']:>20}\n".encode('utf-8') +
+            f"{'IVA: ':<20}${data['sumas_totales']['iva']:>20}\n".encode('utf-8') +
+            f"{'IEPS: ':<20}${data['sumas_totales']['ieps']:>20}\n".encode('utf-8') +
+            f"{'TOTAL: ':<20}${data['sumas_totales']['total']:>20}\n".encode('utf-8') +
+            f"{'------------------------------------------------'.center(40)}\n".encode('utf-8')
+        )
+        win32print.WritePrinter(handle, sumas_totales)
+    except Exception as e:
+        logging.error(f"Error al imprimir sumas totales: {e}")
+        return {'error': True, 'mensaje': str(e)}
+
+    try:
+        # Finalización de la impresión
         extra_space = "\n" * 10
         win32print.WritePrinter(handle, extra_space.encode('utf-8'))
         cut_paper_command = b"\x1D\x56\x00"
         win32print.WritePrinter(handle, cut_paper_command)
-    except Exception as e:
-        logging.error(f"Error al imprimir el espacio extra o cortar el papel: {e}")
-        return {'error': True, 'mensaje': str(e)}
-
-    try:
         win32print.EndPagePrinter(handle)
         win32print.EndDocPrinter(handle)
         win32print.ClosePrinter(handle)
@@ -439,7 +490,6 @@ def print_cashier_cut(data):
         return {'error': True, 'mensaje': str(e)}
 
     return {'error': False, 'mensaje': 'Impresión completada con éxito'}
-
 
 #Función para imprimir un ticket de venta	
 
