@@ -165,11 +165,12 @@ def print_receipt(data):
             win32print.WritePrinter(handle, bold_off)
 
 
+        # Creación del encabezado utilizando los datos de 'data'
         header = (
-            f"\n{'FRANCISCO JAVIER TERRONES SUÁREZ.'.center(40)}\n"
-            f"{'DOMICILIO: TORRES QUINTERO 433A, COL. FATIMA, COLIMA, COLIMA.'.center(40)}\n"
-            f"{'TELEFONO: 3121661184'.center(40)}\n"
-            f"{'RFC: TESF680808SX6'.center(40)}\n"
+            f"\n{data['datosEmpresa']['nombre_empresa'].center(40)}\n"
+            f"{('DOMICILIO: ' + data['datosEmpresa']['calle'] + ' ' + data['datosEmpresa']['numero'] + ', COL. ' + data['datosEmpresa']['colonia'] + ', ' + data        ['datosEmpresa']['municipio'] + ', ' + data['datosEmpresa']['estado']).center(40)}\n"
+            f"{'TELEFONO: ' + str(data['datosEmpresa']['telefono']).center(40)}\n"
+            f"{'RFC: ' + data['datosEmpresa']['rfc'].center(40)}\n"
             f"{'------------------------------------------------'.center(40)}\n"
             f"{'FOLIO: ' + data['otros_datos']['id_venta']}\n"
             f"{'CAJA: ' + data['otros_datos']['numeroCaja']}\n"
@@ -177,7 +178,7 @@ def print_receipt(data):
             f"{'CLIENTE: ' + data['otros_datos']['cliente']}\n"
             f"{'FECHA Y HORA: ' + data['otros_datos']['fechaHora']}\n"
             f"{'------------------------------------------------'.center(40)}\n"
-            )
+        )
         win32print.WritePrinter(handle, header.encode('utf-8'))
 
         for producto in data['productos']:
@@ -378,10 +379,10 @@ def print_cashier_cut(data):
     try:
         # Impresión del encabezado
         header = (
-            f"\n{'FRANCISCO JAVIER TERRONES SUAREZ'.center(40)}\n"
-            f"{'DOMICILIO: TORRES QUINTERO 433A, COL. FATIMA, COLIMA, COLIMA.'.center(40)}\n"
-            f"{'TELEFONO: 3121661184'.center(40)}\n"
-            f"{'RFC: TESF680808SX6'.center(40)}\n"
+            f"\n{data['datosEmpresa']['nombre_empresa'].center(40)}\n"
+            f"{('DOMICILIO: ' + data['datosEmpresa']['calle'] + ' ' + data['datosEmpresa']['numero'] + ', COL. ' + data['datosEmpresa']['colonia'] + ', ' + data['datosEmpresa']['municipio'] + ', ' + data['datosEmpresa']['estado']).center(40)}\n"
+            f"{'TELEFONO: ' + str(data['datosEmpresa']['telefono']).center(40)}\n"
+            f"{'RFC: ' + data['datosEmpresa']['rfc'].center(40)}\n"
             f"{'------------------------------------------------'.center(40)}\n"
             f"{'CORTE DE CAJA':<20}\n"
             f"{'TIPO DE CORTE: ' + data['tipo_corte']}\n"
