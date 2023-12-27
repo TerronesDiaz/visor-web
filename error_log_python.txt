@@ -1,0 +1,45 @@
+2023-12-09 21:50:13,840 - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://localhost:3001
+2023-12-09 21:50:13,840 - [33mPress CTRL+C to quit[0m
+2023-12-09 21:50:49,840 - 127.0.0.1 - - [09/Dec/2023 21:50:49] "OPTIONS /imprimir HTTP/1.1" 200 -
+2023-12-09 21:50:50,376 - 127.0.0.1 - - [09/Dec/2023 21:50:50] "POST /imprimir HTTP/1.1" 200 -
+2023-12-09 21:59:04,546 - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://localhost:3001
+2023-12-09 21:59:04,546 - [33mPress CTRL+C to quit[0m
+2023-12-10 00:26:54,828 - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://localhost:3001
+2023-12-10 00:26:54,828 - [33mPress CTRL+C to quit[0m
+2023-12-10 00:27:10,743 - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://localhost:3001
+2023-12-10 00:27:10,744 - [33mPress CTRL+C to quit[0m
+2023-12-10 00:40:24,291 - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://localhost:3001
+2023-12-10 00:40:24,292 - [33mPress CTRL+C to quit[0m
+2023-12-10 00:44:34,181 - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://localhost:3001
+2023-12-10 00:44:34,181 - [33mPress CTRL+C to quit[0m
+2023-12-10 00:46:34,025 - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://localhost:3001
+2023-12-10 00:46:34,025 - [33mPress CTRL+C to quit[0m
+2023-12-10 00:47:08,989 - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://localhost:3001
+2023-12-10 00:47:08,989 - [33mPress CTRL+C to quit[0m
+2023-12-10 00:49:22,345 - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://localhost:3001
+2023-12-10 00:49:22,345 - [33mPress CTRL+C to quit[0m
+2023-12-10 00:51:00,105 - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://localhost:3001
+2023-12-10 00:51:00,105 - [33mPress CTRL+C to quit[0m
+2023-12-10 00:51:41,223 - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://localhost:3001
+2023-12-10 00:51:41,223 - [33mPress CTRL+C to quit[0m
+2023-12-10 00:51:52,216 - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://localhost:3001
+2023-12-10 00:51:52,216 - [33mPress CTRL+C to quit[0m
+2023-12-10 02:07:35,341 - [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://localhost:3001
+2023-12-10 02:07:35,342 - [33mPress CTRL+C to quit[0m
+2023-12-10 02:07:49,533 - 127.0.0.1 - - [10/Dec/2023 02:07:49] "OPTIONS /imprimir HTTP/1.1" 200 -
+2023-12-10 02:07:50,055 - 127.0.0.1 - - [10/Dec/2023 02:07:50] "POST /imprimir HTTP/1.1" 200 -
+2023-12-10 02:08:27,093 - 127.0.0.1 - - [10/Dec/2023 02:08:27] "OPTIONS /imprimirCorte HTTP/1.1" 200 -
+2023-12-10 02:08:27,497 - 127.0.0.1 - - [10/Dec/2023 02:08:27] "POST /imprimirCorte HTTP/1.1" 200 -

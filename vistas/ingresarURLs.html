@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>Seleccione URLs</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  </head>
+  <body>
+    <div class="container my-4">
+      <h1>Ingrese Nombres de Dominio</h1>
+      <form id="domain-form">
+        <div id="domain-inputs">
+          <div class="mb-3 d-flex">
+            <input type="text" class="form-control" name="domains[]" placeholder="dominio1.com" />
+            <button type="button" class="btn btn-danger ms-2 remove-domain">X</button>
+          </div>
+        </div>
+        <button type="button" id="add-domain" class="btn btn-secondary mb-3">Añadir Otro Dominio</button>
+        <button type="submit" class="btn btn-primary">Enviar</button>
+      </form>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+      const { ipcRenderer } = require('electron');
+
+      document.getElementById('add-domain').addEventListener('click', function () {
+        var newInput = document.createElement('div');
+        newInput.className = 'mb-3 d-flex';
+        newInput.innerHTML = '<input type="text" class="form-control" name="domains[]" placeholder="dominio2.org"><button type="button" class="btn btn-danger ms-2 remove-domain">X</button>';
+        document.getElementById('domain-inputs').appendChild(newInput);
+      });
+
+      document.getElementById('domain-form').addEventListener('submit', function (event) {
+        event.preventDefault();
+        var domains = Array.from(document.querySelectorAll('[name="domains[]"]')).map(input => input.value);
+        ipcRenderer.send('domainData', domains);
+      });
+
+      document.addEventListener('click', function (event) {
+        if (event.target.classList.contains('remove-domain')) {
+          event.target.parentElement.remove();
+        }
+      });
+    </script>
+  </body>
+</html>

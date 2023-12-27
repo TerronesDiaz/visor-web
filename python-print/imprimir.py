@@ -423,18 +423,18 @@ def print_cashier_cut(data):
         return {'error': True, 'mensaje': str(e)}
 
     try:
-        # Impresión de sumas generales
+       # Impresión de sumas generales
         sumas_generales = (
             font_large_bold +
             f"{'TOTAL'.center(40)}\n".encode('utf-8') +
             font_normal +
-            f"{'IEPS_TOTAL: ':<20}${data['sumas_generales']['ieps']:>20}\n".encode('utf-8') +
-            f"{'IVA_TOTAL: ':<20}${data['sumas_generales']['iva']:>20}\n".encode('utf-8') +
-            f"{'TOTAL CORTE: ':<20}${data['sumas_generales']['total']:>20}\n".encode('utf-8') +
+            f"{'IEPS_TOTAL: ':<15}${data['sumas_generales']['ieps']}\n".encode('utf-8') +
+            f"{'IVA_TOTAL: ':<15}${data['sumas_generales']['iva']}\n".encode('utf-8') +
+            f"{'TOTAL CORTE: ':<15}${data['sumas_generales']['total']}\n".encode('utf-8') +
             f"{'------------------------------------------------'.center(40)}\n".encode('utf-8') +
-            f"{'SALDO INICIAL: ':<20}${data['saldo_inicial']:>20}\n".encode('utf-8') +
+            f"{'SALDO INICIAL: ':<15}${data['saldo_inicial']}\n".encode('utf-8') +
             font_large_bold +
-            f"{'TOTAL CORTE + SALDO INICIAL: ':<20}${data['sumas_generales']['total'] + data['saldo_inicial']:>20}\n".encode('utf-8') +
+            f"{'TOTAL + S. INI: ':<15}${data['sumas_generales']['total'] + data['saldo_inicial']}\n".encode('utf-8') +
             font_normal +
             f"{'------------------------------------------------'.center(40)}\n".encode('utf-8')
         )
@@ -449,10 +449,10 @@ def print_cashier_cut(data):
             font_large_bold +
             f"\n{'DEVOLUCIONES'.center(40)}\n".encode('utf-8') +
             font_normal +
-            f"{'SUBTOTAL DEVOLUCIONES: ':<20}${data['sumas_devoluciones']['subtotal']:>20}\n".encode('utf-8') +
-            f"{'IVA DEVOLUCIONES: ':<20}${data['sumas_devoluciones']['iva']:>20}\n".encode('utf-8') +
-            f"{'IEPS DEVOLUCIONES: ':<20}${data['sumas_devoluciones']['ieps']:>20}\n".encode('utf-8') +
-            f"{'TOTAL DEVOLUCIONES: ':<20}${data['sumas_devoluciones']['total']:>20}\n".encode('utf-8') +
+            f"{'SUBTOTAL DEV: ':<15}${data['sumas_devoluciones']['subtotal']}\n".encode('utf-8') +
+            f"{'IVA DEV: ':<15}${data['sumas_devoluciones']['iva']}\n".encode('utf-8') +
+            f"{'IEPS DEV: ':<15}${data['sumas_devoluciones']['ieps']}\n".encode('utf-8') +
+            f"{'TOTAL DEV: ':<15}${data['sumas_devoluciones']['total']}\n".encode('utf-8') +
             f"{'------------------------------------------------'.center(40)}\n".encode('utf-8')
         )
         win32print.WritePrinter(handle, sumas_devoluciones)
@@ -466,10 +466,11 @@ def print_cashier_cut(data):
             font_large_bold +
             f"\n{'TOTAL VENTA - DEVOLUCIONES'.center(40)}\n".encode('utf-8') +
             font_normal +
-            f"{'SUBTOTAL: ':<20}${data['sumas_totales']['subtotal']:>20}\n".encode('utf-8') +
-            f"{'IVA: ':<20}${data['sumas_totales']['iva']:>20}\n".encode('utf-8') +
-            f"{'IEPS: ':<20}${data['sumas_totales']['ieps']:>20}\n".encode('utf-8') +
-            f"{'TOTAL: ':<20}${data['sumas_totales']['total']:>20}\n".encode('utf-8') +
+            f"{'SUBTOTAL: ':<15}${data['sumas_totales']['subtotal']}\n".encode('utf-8') +
+            f"{'IVA: ':<15}${data['sumas_totales']['iva']}\n".encode('utf-8') +
+            f"{'IEPS: ':<15}${data['sumas_totales']['ieps']}\n".encode('utf-8') +
+            f"{'TOTAL: ':<15}${data['sumas_totales']['total']}\n".encode('utf-8') +
+            f"{'TOTAL + S INI: ':<15}${data['sumas_totales']['total'] + data['saldo_inicial']}\n".encode('utf-8') +
             f"{'------------------------------------------------'.center(40)}\n".encode('utf-8')
         )
         win32print.WritePrinter(handle, sumas_totales)

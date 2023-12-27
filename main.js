@@ -11,24 +11,32 @@ const path = require('path');
 
 const { start } = require('./apiCajon/index');
 
-function runPythonScript() {
-  // Construir la ruta absoluta al script de Python
+
+// Lee las URLs desde appURLs.json
+function loadURLs() {
+  try {
+    const urls = JSON.parse(fs.readFileSync(path.join(__dirname, 'appURLs.json'))).appURLs;
+    return urls;
+  } catch (err) {
+    console.error('Error al cargar URLs:', err);
+    return []; // Devuelve un array vacío si hay un error
+  }
+}
+
+
+function runPythonScript(imagePath) {
+  // Si no se proporciona una ruta de imagen, utiliza la ruta de la imagen predeterminada
+  const imageToUse = imagePath || path.join(__dirname, 'python-print','media', 'img', 'picture.png');
+
+  executePythonScript(imageToUse);
+}
+
+
+function executePythonScript(imagePath) {
   const scriptPath = path.join(process.resourcesPath, 'app.asar.unpacked', 'python-print', 'imprimir.py');
 
-  // Ruta absoluta donde se encuentra la imagen
-  const imagePath = path.join(process.resourcesPath, 'app.asar.unpacked', 'python-print', 'media', 'img', 'terronescolima-logo.png');
 
 
-  // Listar los archivos en la carpeta 'python-print'
-  fs.readdir(path.join(__dirname, 'python-print'), (err, files) => {
-    if (err) {
-      logger.error('Error listing files:', err);
-    } else {
-      logger.info('Files in python-print:', files);
-    }
-  });
-
-  // Ejecutar el script de Python y pasar imagePath como argumento
   const pythonProcess = spawn("python", [scriptPath, imagePath]);
 
   pythonProcess.stdout.on("data", (data) => {
@@ -39,12 +47,35 @@ function runPythonScript() {
   pythonProcess.stderr.on("data", (data) => {
     console.error(`stderr: ${data}`);
     logger.error(`stderr: ${data}`);
-    logger.info(`Current directory: ${process.cwd()}`);
   });
 
   pythonProcess.on("close", (code) => {
     console.log(`child process exited with code ${code}`);
     logger.info(`child process exited with code ${code}`);
+    if (code !== 0) {
+      logger.error(`El script de Python terminó con un error con el código: ${code}`);
+    }
+  });
+}
+
+function checkAndSelectImage(selectedURL) {
+  // Obtener el nombre de la tienda a partir de la URL
+  const storeName = selectedURL.replace(/^https?:\/\//, '').replace(/\.[a-z]{2,}\/?$/, '');
+
+  // Define la ruta de imagen predeterminada en el directorio de datos del usuario
+  const userDataPath = app.getPath('userData');
+  const defaultImagePath = path.join(userDataPath, 'images', `${storeName}.png`);
+
+  return new Promise((resolve, reject) => {
+    // Verificar si la imagen existe en la ruta del directorio de datos del usuario
+    fs.access(defaultImagePath, fs.constants.F_OK, (err) => {
+      if (err) {
+        console.error("Error al acceder a la imagen:", err);
+        resolve(false); // Si hay un error, resolver a false
+      } else {
+        resolve(defaultImagePath); // Si no hay error, resolver con la ruta de la imagen predeterminada
+      }
+    });
   });
 }
 
@@ -171,7 +202,6 @@ ipcMain.on('perform-search', async (event, searchQuery) => {
 
 // Load config at the beginning
 loadConfig();
-runPythonScript();
 
 
 ipcMain.on('close-window', (event, arg) => {
@@ -298,6 +328,49 @@ function createWindow(url) {
   });
 }
 
+function createImageSelectionWindow(selectedURL) {
+  const storeName = selectedURL.replace(/^https?:\/\//, '').replace(/\.[a-z]{2,}\/?$/, '');
+  return new Promise((resolve, reject) => {
+    let win = new BrowserWindow({
+      width: 800,
+      height: 600,
+      webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false
+      },
+      resizable: false,
+      closable: true
+    });
+
+    let imageSelected = false;
+
+    win.loadFile(path.join(__dirname, 'vistas', 'image-selection.html'));
+
+    ipcMain.once('image-selected', (event, imagePath) => {
+      imageSelected = true;
+      win.close();
+
+      const userDataPath = app.getPath('userData'); // Obtiene la ruta del directorio de datos del usuario
+      const imageDirPath = path.join(userDataPath, 'images'); // Define el directorio de imágenes
+      if (!fs.existsSync(imageDirPath)) {
+        fs.mkdirSync(imageDirPath, { recursive: true }); // Crea el directorio si no existe
+      }
+      const savedImagePath = path.join(imageDirPath, `${storeName}.png`); // Define la ruta de la imagen guardada
+      const imageBuffer = fs.readFileSync(imagePath);
+      fs.writeFileSync(savedImagePath, imageBuffer); // Escribe el buffer de imagen en la ruta de la imagen guardada
+
+      resolve(savedImagePath);
+    });
+
+    win.on('closed', () => {
+      if (!imageSelected) {
+        resolve(null);
+      }
+    });
+  });
+}
+
+
 app.whenReady().then(async () => {
   start(); 
   logger.info("Aplicación lista. Inicializando autoUpdater.");
@@ -337,24 +410,60 @@ app.whenReady().then(async () => {
     logger.error("Error durante la actualización:", error);
   });
 
-  const urls = packageConfig.appURLs;
+  const urls = loadURLs();
   let selectedURL;
 
-  if (urls && urls.length > 1) {
-    const options = {
-      type: "question",
-      buttons: urls,
-      title: "Seleccione una URL",
-      message: "¿A cuál de sus tiendas desea acceder?",
-    };
-
-    const userChoice = await dialog.showMessageBox(options);
-    selectedURL = urls[userChoice.response];
+  if (urls && urls.length > 0) {
+    if (urls.length > 1) {
+      const options = {
+        type: "question",
+        buttons: urls,
+        title: "Seleccione una URL",
+        message: "¿A cuál de sus tiendas desea acceder?",
+      };
+  
+      const userChoice = await dialog.showMessageBox(options);
+      if (userChoice.response !== -1) {
+        selectedURL = urls[userChoice.response];
+      } else {
+        console.log("No se seleccionó ninguna URL. Cerrando aplicación.");
+        app.quit();
+        return; // Agrega este return para asegurarte de que no se ejecute más código después de cerrar la app.
+      }
+    } else {
+      selectedURL = urls[0];
+    }
   } else {
-    selectedURL = urls ? urls[0] : packageConfig.appURL;
+    console.log("No hay URLs disponibles. Cerrando aplicación.");
+    app.quit();
+    return; // Agrega este return para asegurarte de que no se ejecute más código después de cerrar la app.
   }
 
-  createWindow(selectedURL);
+  try {
+    //Verifica si ya existe el path de la imagen
+    const defaultImagePath = await checkAndSelectImage(selectedURL);
+    let imagePath;
+    if(!defaultImagePath) {
+      imagePath = await createImageSelectionWindow(selectedURL); // Espera a que se seleccione la imagen
+    }else{
+      imagePath = defaultImagePath;
+    }
+    // Si se proporciona una ruta de imagen, ejecuta el script de Python y crea la ventana principal
+    if (imagePath) {
+      logger.info("Imagen seleccionada:", imagePath);
+      runPythonScript(imagePath); // Ejecuta el script de Python con la ruta de la imagen
+      createWindow(selectedURL); // Crea la ventana principal después de seleccionar la imagen
+    } else {
+      // Si no se seleccionó ninguna imagen, registra un error y cierra la aplicación
+      logger.error("No se seleccionó ninguna imagen.");
+      app.quit();
+    }
+  } catch (error) {
+    // Si ocurre un error durante la selección de la imagen, regístralo y cierra la aplicación
+    logger.error("Error en la selección de imagen:", error);
+    app.quit();
+  }
+  
 });
 
 app.on("window-all-closed", () => {

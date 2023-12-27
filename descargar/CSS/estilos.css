@@ -1,0 +1,33 @@
+/* Estilos para el botón cuando está descargando */
+.btn-descargando {
+    opacity: 0.7; /* Hace el botón ligeramente transparente */
+    cursor: not-allowed; /* Cambia el cursor a no permitido */
+}
+
+/* Animación para el icono de carga */
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+.fas.fa-spinner.fa-spin {
+    animation: spin 1s linear infinite;
+}
+
+
+@keyframes bounceUp {
+    0%, 20%, 50%, 80%, 100% {
+        transform: translateY(0) rotate(180deg);
+    }
+    40% {
+        transform: translateY(30px) rotate(180deg);
+    }
+    60% {
+        transform: translateY(15px) rotate(180deg);
+    }
+}
+
+#downloadArrow {
+    animation: bounceUp 2s infinite;
+}
+
