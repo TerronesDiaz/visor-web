@@ -8,8 +8,11 @@ import unicodedata
 from PIL import Image
 import sys
 import datetime
+
+
 def quitar_acentos(texto):
     return ''.join((c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn'))
+
 
 app = Flask(__name__)
 CORS(app)  # Habilita CORS para todas las rutas
@@ -19,9 +22,12 @@ HTTP_STATUS_SERVER_ERROR = 500
 
 
 def numero_a_palabras(numero):
-    unidades = ('', 'UNO', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE', 'DIEZ', 'ONCE', 'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISEIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE', 'VEINTE')
-    decenas = ('', '', 'VEINTI', 'TREINTA', 'CUARENTA', 'CINCUENTA', 'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA')
-    centenas = ('', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS', 'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS')
+    unidades = ('', 'UNO', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE', 'DIEZ', 'ONCE',
+                'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISEIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE', 'VEINTE')
+    decenas = ('', '', 'VEINTI', 'TREINTA', 'CUARENTA', 'CINCUENTA',
+               'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA')
+    centenas = ('', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS',
+                'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS')
 
     try:
         n = int(numero)
@@ -33,19 +39,20 @@ def numero_a_palabras(numero):
         return 'CERO PESOS %02d/100 M.N' % centavos
 
     resultado = ''
-    
+
     # Manejar millones
     if n >= 1000000:
         millones = n // 1000000
         n = n % 1000000
-        resultado += numero_a_palabras(millones) + ' MILLON' + ('ES ' if millones > 1 else ' ')
+        resultado += numero_a_palabras(millones) + \
+            ' MILLON' + ('ES ' if millones > 1 else ' ')
 
     # Manejar miles
     if n >= 1000:
         miles = n // 1000
         n = n % 1000
         resultado += numero_a_palabras(miles) + ' MIL '
-        
+
     # Manejar centenas
     if n >= 100:
         c = n // 100
@@ -72,25 +79,29 @@ def numero_a_palabras(numero):
 
     return resultado.strip()
 
+
 # Ejemplo de uso
-print(numero_a_palabras(298))  # Debería imprimir "DOSCIENTOS NOVENTA Y OCHO PESOS 00/100 M.N"
+# Debería imprimir "DOSCIENTOS NOVENTA Y OCHO PESOS 00/100 M.N"
+print(numero_a_palabras(298))
 
 
-def convert_image_to_bytes(image_path, paper_width=576):  # Actualice el ancho del papel aquí
+# Actualice el ancho del papel aquí
+def convert_image_to_bytes(image_path, paper_width=576):
     image = Image.open(image_path).convert("1")  # Convertir a monocromo
     im_width, im_height = image.size
-    
+
     # Calcular el padding para centrar la imagen
     padding = (paper_width - im_width) // 2
-    
+
     # Crear una nueva imagen con el padding añadido
     new_image = Image.new("1", (paper_width, im_height), color=0)
     new_image.paste(image, (padding, 0))
-    
+
     pixels = list(new_image.getdata())
-    
+
     # Convertir a bytes y agregar comandos ESC/POS para imprimir la imagen
-    image_bytes = [0x1D, 0x76, 0x30, 0x00, paper_width // 8, 0, im_height % 256, im_height // 256]
+    image_bytes = [0x1D, 0x76, 0x30, 0x00, paper_width //
+                   8, 0, im_height % 256, im_height // 256]
     for y in range(im_height):
         for x in range(0, paper_width, 8):
             byte = 0x0
@@ -113,7 +124,8 @@ def validar_datos(data):
             return False, f"Falta el campo {campo}"
 
     # Validar el campo 'otros_datos'
-    otros_datos_requeridos = ['id_venta', 'numeroCaja', 'cajero', 'cliente', 'fechaHora']
+    otros_datos_requeridos = ['id_venta',
+                              'numeroCaja', 'cajero', 'cliente', 'fechaHora']
     for campo in otros_datos_requeridos:
         if campo not in data['otros_datos']:
             return False, f"Falta el campo {campo} en otros_datos"
@@ -139,15 +151,19 @@ def validar_datos(data):
             return False, "Falta algún campo en la lista de métodos de pago."
 
     return True, "Datos válidos"
+
+
 def print_receipt(data):
     try:
         printer_name = win32print.GetDefaultPrinter()
         handle = win32print.OpenPrinter(printer_name)
-        job_id = win32print.StartDocPrinter(handle, 1, ("Python_Print_Job", None, "RAW"))
+        job_id = win32print.StartDocPrinter(
+            handle, 1, ("Python_Print_Job", None, "RAW"))
         win32print.StartPagePrinter(handle)
 
         try:
-            logo_path = sys.argv[1]  # Aquí se almacena la ruta absoluta de la imagen
+            # Aquí se almacena la ruta absoluta de la imagen
+            logo_path = sys.argv[1]
             logo_bytes = convert_image_to_bytes(logo_path)
             win32print.WritePrinter(handle, logo_bytes)
         except FileNotFoundError:
@@ -163,7 +179,6 @@ def print_receipt(data):
             win32print.WritePrinter(handle, "DEVOLUCIÓN\n".encode('utf-8'))
             win32print.WritePrinter(handle, extra_space.encode('utf-8'))
             win32print.WritePrinter(handle, bold_off)
-
 
         # Creación del encabezado utilizando los datos de 'data'
         header = (
@@ -184,10 +199,10 @@ def print_receipt(data):
         for producto in data['productos']:
             descripcion_text = quitar_acentos(producto['descripcion']) + "\n"
             win32print.WritePrinter(handle, descripcion_text.encode('utf-8'))
-        
+
             cantidad_formatted = format(producto['cantidad'], '.3f')
             total = producto['importe'] / producto['cantidad']
-        
+
             item_text = (
                 f"{cantidad_formatted.center(15)}"
                 f"${format(total, '.2f').center(15)}"
@@ -216,23 +231,27 @@ def print_receipt(data):
             "------------------------------------------------\n"
             f"{bold_off.decode('latin1')}"
         )
-    
-        win32print.WritePrinter(handle, totales.encode('utf-8'))  # Codifica en UTF-8
+
+        win32print.WritePrinter(
+            handle, totales.encode('utf-8'))  # Codifica en UTF-8
 
         # Método de Pago
         pagos_header = f"{'Forma de Pago':<20}{'Importe':<10}{'Restante':<10}\n"
-        win32print.WritePrinter(handle, pagos_header.encode('utf-8'))  # Codifica en UTF-8
-    
-        total_restante = float(data['totales']['total'])  # Inicializamos con el total de la venta
-        num_pagos = len(data['metodoPago'])  # Obtenemos el número total de pagos
+        win32print.WritePrinter(
+            handle, pagos_header.encode('utf-8'))  # Codifica en UTF-8
+
+        # Inicializamos con el total de la venta
+        total_restante = float(data['totales']['total'])
+        # Obtenemos el número total de pagos
+        num_pagos = len(data['metodoPago'])
 
         for index, pago in enumerate(data['metodoPago']):
             importe_pago = float(pago['importe'])
             total_restante -= importe_pago  # Restamos el importe del pago al total restante
-        
+
             # Verificamos si el método de pago es "Cambio" o "cambio"
             es_cambio = pago['metodoPago'].lower() == 'cambio'
-        
+
             # Si es "Cambio", activamos el modo negrita y añadimos un espacio adicional
             if es_cambio:
                 win32print.WritePrinter(handle, bold_on)
@@ -247,10 +266,12 @@ def print_receipt(data):
                 pago_text = (
                     f"{pago['metodoPago']:<20}"
                     f"${importe_pago:<10.2f}"
-                    f"${total_restante:<10.2f}\n"  # Añadimos el total restante aquí
+                    # Añadimos el total restante aquí
+                    f"${total_restante:<10.2f}\n"
                 )
-        
-            win32print.WritePrinter(handle, pago_text.encode('utf-8'))  # Codifica en UTF-8
+
+            win32print.WritePrinter(
+                handle, pago_text.encode('utf-8'))  # Codifica en UTF-8
 
             # Si era "Cambio", desactivamos el modo negrita y añadimos un espacio adicional
             if es_cambio:
@@ -261,14 +282,15 @@ def print_receipt(data):
         # Si existe data.concepto y no está vacío ni es null, lo imprimimos
         if 'concepto' in data and data['concepto']:
             concepto_text = f"CONCEPTO: {data['concepto']}\n"
-            win32print.WritePrinter(handle, concepto_text.encode('utf-8'))  # Codifica en UTF-8
-            
-
+            win32print.WritePrinter(
+                handle, concepto_text.encode('utf-8'))  # Codifica en UTF-8
 
         extra_space = "\n" * 10  # Ajusta el número según tus necesidades
-        win32print.WritePrinter(handle, extra_space.encode('utf-8'))  # Codifica en UTF-8
+        win32print.WritePrinter(
+            handle, extra_space.encode('utf-8'))  # Codifica en UTF-8
 
-        cut_paper_command = b"\x1D\x56\x00"  # Este comando es específico para ciertos modelos de Epson
+        # Este comando es específico para ciertos modelos de Epson
+        cut_paper_command = b"\x1D\x56\x00"
         win32print.WritePrinter(handle, cut_paper_command)
 
         win32print.EndPagePrinter(handle)
@@ -277,88 +299,167 @@ def print_receipt(data):
     except Exception as e:
         raise e
 
+
+def validate_data_structure_pwa(data):
+    if not isinstance(data, dict):
+        return False
+    if 'sections' not in data:
+        return False
+    sections = data['sections']
+    if not isinstance(sections, list):
+        return False
+    for section in sections:
+        if not isinstance(section, dict):
+            return False
+        if 'type' not in section:
+            return False
+        if section['type'] not in ['title', 'text', 'table']:
+            return False
+        if section['type'] == 'table':
+            if 'columns' not in section:
+                return False
+            if not isinstance(section['columns'], list):
+                return False
+            if 'rows' not in section:
+                return False
+            if not isinstance(section['rows'], list):
+                return False
+    return True
+
+
+def print_receipt_pwa(data):
+    try:
+        printer_name = win32print.GetDefaultPrinter()
+        handle = win32print.OpenPrinter(printer_name)
+        job_id = win32print.StartDocPrinter(
+            handle, 1, ("Python_Print_Job", None, "RAW"))
+        win32print.StartPagePrinter(handle)
+
+        sections = data['sections']
+
+        for section in sections:
+            if section['type'] == 'title':
+                bold_on = b'\x1B\x45\x01'
+                win32print.WritePrinter(handle, bold_on)
+                win32print.WritePrinter(
+                    handle, section['content'].encode('utf-8'))
+                bold_off = b'\x1B\x45\x00'
+                win32print.WritePrinter(handle, bold_off)
+            elif section['type'] == 'text':
+                win32print.WritePrinter(
+                    handle, section['content'].encode('utf-8'))
+            elif section['type'] == 'table':
+                column_headers = section['columns']
+                header_text = '\t'.join(column_headers)
+                win32print.WritePrinter(handle, header_text.encode('utf-8'))
+                for row in section['rows']:
+                    row_text = '\t'.join(row)
+                    win32print.WritePrinter(handle, row_text.encode('utf-8'))
+
+        win32print.EndPagePrinter(handle)
+        win32print.EndDocPrinter(handle)
+        win32print.ClosePrinter(handle)
+    except Exception as e:
+        raise e
+
+
 # Configura el sistema de registro
-logging.basicConfig(filename='error_log_python.txt', level=logging.ERROR, format='%(asctime)s - %(message)s')
+logging.basicConfig(filename='error_log_python.txt',
+                    level=logging.ERROR, format='%(asctime)s - %(message)s')
+
 
 def validate_cashier_cut_data(data):
     try:
         required_fields = [
-            'tipo_corte', 
-            'id_corte', 
-            'id_caja', 
-            'id_cajero', 
-            'nombre_cajero', 
-            'fecha_corte', 
+            'tipo_corte',
+            'id_corte',
+            'id_caja',
+            'id_cajero',
+            'nombre_cajero',
+            'fecha_corte',
             'hora_corte',
             'sumas_generales',
             'sumas_por_forma_pago',
             'saldo_inicial'
         ]
-        
+
         # Verifica que todos los campos requeridos existan
         for field in required_fields:
             if field not in data:
-                logging.error(f"Campo requerido '{field}' no encontrado en los datos.")
+                logging.error(
+                    f"Campo requerido '{field}' no encontrado en los datos.")
                 return {'error': True, 'mensaje': f"Campo requerido '{field}' no encontrado en los datos."}
-        
+
         # Intenta corregir el tipo de los campos numéricos
         for field in ['id_corte', 'id_caja', 'id_cajero', 'saldo_inicial']:
             try:
                 data[field] = int(data[field])
             except ValueError:
-                logging.error(f"Campo '{field}' no puede ser convertido a entero.")
+                logging.error(
+                    f"Campo '{field}' no puede ser convertido a entero.")
                 return {'error': True, 'mensaje': f"Campo '{field}' no puede ser convertido a entero."}
-            
+
         # Intenta normalizar el formato de la fecha y la hora
         try:
-            fecha_dt = datetime.datetime.strptime(data['fecha_corte'], '%Y-%m-%d')
+            fecha_dt = datetime.datetime.strptime(
+                data['fecha_corte'], '%Y-%m-%d')
             data['fecha_corte'] = fecha_dt.strftime('%d-%m-%Y')
         except ValueError:
             try:
-                fecha_dt = datetime.datetime.strptime(data['fecha_corte'], '%d-%m-%Y')
+                fecha_dt = datetime.datetime.strptime(
+                    data['fecha_corte'], '%d-%m-%Y')
                 data['fecha_corte'] = fecha_dt.strftime('%d-%m-%Y')
             except ValueError:
-                logging.error("Formato de fecha incorrecto. No se puede transformar a DD-MM-YYYY.")
+                logging.error(
+                    "Formato de fecha incorrecto. No se puede transformar a DD-MM-YYYY.")
                 return {'error': True, 'mensaje': "Formato de fecha incorrecto. No se puede transformar a DD-MM-YYYY."}
-        
+
         try:
             hora_dt = datetime.datetime.strptime(data['hora_corte'], '%H:%M')
             data['hora_corte'] = hora_dt.strftime('%I:%M %p')
         except ValueError:
             try:
-                hora_dt = datetime.datetime.strptime(data['hora_corte'], '%I:%M %p')
+                hora_dt = datetime.datetime.strptime(
+                    data['hora_corte'], '%I:%M %p')
                 data['hora_corte'] = hora_dt.strftime('%I:%M %p')
             except ValueError:
-                logging.error("Formato de hora incorrecto. No se puede transformar a formato de 12 horas.")
+                logging.error(
+                    "Formato de hora incorrecto. No se puede transformar a formato de 12 horas.")
                 return {'error': True, 'mensaje': "Formato de hora incorrecto. No se puede transformar a formato de 12 horas."}
-            
+
         # Verifica que sumas_generales tenga los campos necesarios
-        sumas_generales_fields = ['subtotal', 'descuento', 'iva', 'ieps', 'total']
+        sumas_generales_fields = ['subtotal',
+                                  'descuento', 'iva', 'ieps', 'total']
         for field in sumas_generales_fields:
             if field not in data['sumas_generales']:
-                logging.error(f"Campo requerido 'sumas_generales.{field}' no encontrado en los datos.")
+                logging.error(
+                    f"Campo requerido 'sumas_generales.{field}' no encontrado en los datos.")
                 return {'error': True, 'mensaje': f"Campo requerido 'sumas_generales.{field}' no encontrado en los datos."}
-        
+
         # Verifica que cada objeto en sumas_por_forma_pago tenga los campos necesarios
-        forma_pago_fields = ['nombre_forma_pago', 'suma_total', 'suma_iva', 'suma_ieps']
+        forma_pago_fields = ['nombre_forma_pago',
+                             'suma_total', 'suma_iva', 'suma_ieps']
         for forma_pago in data['sumas_por_forma_pago']:
             for field in forma_pago_fields:
                 if field not in forma_pago:
-                    logging.error(f"Campo requerido 'sumas_por_forma_pago.{field}' no encontrado en los datos.")
+                    logging.error(
+                        f"Campo requerido 'sumas_por_forma_pago.{field}' no encontrado en los datos.")
                     return {'error': True, 'mensaje': f"Campo requerido 'sumas_por_forma_pago.{field}' no encontrado en los datos."}
-        
+
         logging.info("Validación exitosa")
         return {'error': False, 'mensaje': 'Validación exitosa'}
     except Exception as e:
         logging.error(f'Error desconocido: {str(e)}')
         return {'error': True, 'mensaje': f'Error desconocido en la validación de corte: {str(e)}'}
 
+
 def print_cashier_cut(data):
     try:
         # Configuración inicial de la impresora
         printer_name = win32print.GetDefaultPrinter()
         handle = win32print.OpenPrinter(printer_name)
-        job_id = win32print.StartDocPrinter(handle, 1, ("Python_Print_Job", None, "RAW"))
+        job_id = win32print.StartDocPrinter(
+            handle, 1, ("Python_Print_Job", None, "RAW"))
         win32print.StartPagePrinter(handle)
 
         # Configuración de fuentes
@@ -405,7 +506,8 @@ def print_cashier_cut(data):
         for forma_pago in data['sumas_por_forma_pago']:
             forma_pago_total = forma_pago['suma_total']
             accumulated_total += float(forma_pago_total)
-            nombre_sin_acentos = quitar_acentos(forma_pago['nombre_forma_pago'])
+            nombre_sin_acentos = quitar_acentos(
+                forma_pago['nombre_forma_pago'])
             forma_pago_text = (
                 font_large_bold +
                 f"{nombre_sin_acentos.upper().center(40)}\n".encode('utf-8') +
@@ -415,7 +517,8 @@ def print_cashier_cut(data):
                 font_large_bold +
                 f"{'TOTAL: ':<15}${forma_pago_total:>15} +   ${accumulated_total:>15}\n".encode('utf-8') +
                 font_normal +
-                f"{'------------------------------------------------'.center(40)}\n".encode('utf-8')
+                f"{'------------------------------------------------'.center(40)}\n".encode(
+                    'utf-8')
             )
             win32print.WritePrinter(handle, forma_pago_text)
     except Exception as e:
@@ -436,7 +539,8 @@ def print_cashier_cut(data):
             font_large_bold +
             f"{'TOTAL + S. INI: ':<15}${data['sumas_generales']['total'] + data['saldo_inicial']}\n".encode('utf-8') +
             font_normal +
-            f"{'------------------------------------------------'.center(40)}\n".encode('utf-8')
+            f"{'------------------------------------------------'.center(40)}\n".encode(
+                'utf-8')
         )
         win32print.WritePrinter(handle, sumas_generales)
     except Exception as e:
@@ -453,7 +557,8 @@ def print_cashier_cut(data):
             f"{'IVA DEV: ':<15}${data['sumas_devoluciones']['iva']}\n".encode('utf-8') +
             f"{'IEPS DEV: ':<15}${data['sumas_devoluciones']['ieps']}\n".encode('utf-8') +
             f"{'TOTAL DEV: ':<15}${data['sumas_devoluciones']['total']}\n".encode('utf-8') +
-            f"{'------------------------------------------------'.center(40)}\n".encode('utf-8')
+            f"{'------------------------------------------------'.center(40)}\n".encode(
+                'utf-8')
         )
         win32print.WritePrinter(handle, sumas_devoluciones)
     except Exception as e:
@@ -471,7 +576,8 @@ def print_cashier_cut(data):
             f"{'IEPS: ':<15}${data['sumas_totales']['ieps']}\n".encode('utf-8') +
             f"{'TOTAL: ':<15}${data['sumas_totales']['total']}\n".encode('utf-8') +
             f"{'TOTAL + S INI: ':<15}${data['sumas_totales']['total'] + data['saldo_inicial']}\n".encode('utf-8') +
-            f"{'------------------------------------------------'.center(40)}\n".encode('utf-8')
+            f"{'------------------------------------------------'.center(40)}\n".encode(
+                'utf-8')
         )
         win32print.WritePrinter(handle, sumas_totales)
     except Exception as e:
@@ -493,7 +599,20 @@ def print_cashier_cut(data):
 
     return {'error': False, 'mensaje': 'Impresión completada con éxito'}
 
-#Función para imprimir un ticket de venta	
+
+def open_drawer():
+    printer_name = win32print.GetDefaultPrinter()
+    handle = win32print.OpenPrinter(printer_name)
+    open_drawer_command = b'\x1B\x70\x00\x19\xFA'
+    win32print.StartDocPrinter(handle, 1, ("Python_Print_Job", None, "RAW"))
+    win32print.StartPagePrinter(handle)
+    win32print.WritePrinter(handle, open_drawer_command)
+    win32print.EndPagePrinter(handle)
+    win32print.EndDocPrinter(handle)
+    win32print.ClosePrinter(handle)
+
+# Función para imprimir un ticket de venta
+
 
 @app.route('/imprimir', methods=['POST'])
 def imprimir():
@@ -501,68 +620,50 @@ def imprimir():
         data = request.json
         if not data:
             raise ValueError("Datos de impresión vacíos o no proporcionados.")
-        
-        valido, mensaje = validar_datos(data)
-        if not valido:
-           raise ValueError(mensaje)
-        
-        print_receipt(data)
 
-        #Si existe una propiedad data.openDrawer y es true, se abre el cajón
+        pwa = False
+        if 'pwa' in data and data['pwa']:
+            pwa = True
+
+        # Validate data structure
+        if pwa:
+            if not validate_data_structure_pwa(data):
+                raise ValueError("Estructura de datos no válida.")
+        else:
+            valido, mensaje = validar_datos(data)
+            if not valido:
+                raise ValueError(mensaje)
+
+        # Print receipt
+        if pwa:
+            print_receipt_pwa(data)
+        else:
+            print_receipt(data)
+
+        # Open drawer if requested
         if 'openDrawer' in data and data['openDrawer']:
-            printer_name = win32print.GetDefaultPrinter()
-            handle = win32print.OpenPrinter(printer_name)
-            open_drawer_command = b'\x1B\x70\x00\x19\xFA'  # Este comando es específico para ciertos modelos de Epson
-            win32print.StartDocPrinter(handle, 1, ("Python_Print_Job", None, "RAW"))
-            win32print.StartPagePrinter(handle)
-            win32print.WritePrinter(handle, open_drawer_command)
-            win32print.EndPagePrinter(handle)
-            win32print.EndDocPrinter(handle)
-            win32print.ClosePrinter(handle)
+            open_drawer()
 
         return jsonify(error=False, mensaje='Impresión completada'), HTTP_STATUS_OK
 
-    except ValueError as ve:
-        # Errores de valor o formato
-        return jsonify(error=True, mensaje=f'Error de validación: {str(ve)}'), HTTP_STATUS_SERVER_ERROR
-    except win32print.error as wp:
-        # Errores relacionados con la impresión
-        return jsonify(error=True, mensaje=f'Error de impresión: {str(wp)}'), HTTP_STATUS_SERVER_ERROR
     except Exception as e:
-        # Otros errores inesperados
-        return jsonify(error=True, mensaje=f'Error inesperado i: {str(e)}'), HTTP_STATUS_SERVER_ERROR
+        return jsonify(error=True, mensaje=f'Error inesperado: {e}'), HTTP_STATUS_SERVER_ERROR
 
-#Función para abrir el cajón de dinero
+
+# Función para abrir el cajón de dinero
 @app.route('/abrirCajon', methods=['POST'])
 def abrirCajon():
     try:
         data = request.json
         if not data or 'openDrawer' not in data or not data['openDrawer']:
             return jsonify(error=True, mensaje='Parámetro openDrawer no proporcionado o falso'), HTTP_STATUS_SERVER_ERROR
-        
-        # Obtener el nombre de la impresora predeterminada
-        printer_name = win32print.GetDefaultPrinter()
-        # Abrir la impresora
-        handle = win32print.OpenPrinter(printer_name)
-        # Comando para abrir el cajón. Específico para ciertos modelos de Epson.
-        open_drawer_command = b'\x1B\x70\x00\x19\xFA'
-        # Iniciar un nuevo trabajo de impresión
-        win32print.StartDocPrinter(handle, 1, ("Python_Drawer_Open_Job", None, "RAW"))
-        # Iniciar una nueva página
-        win32print.StartPagePrinter(handle)
-        # Enviar el comando para abrir el cajón
-        win32print.WritePrinter(handle, open_drawer_command)
-        # Finalizar la página
-        win32print.EndPagePrinter(handle)
-        # Finalizar el trabajo de impresión
-        win32print.EndDocPrinter(handle)
-        # Cerrar la impresora
-        win32print.ClosePrinter(handle)
+
+        open_drawer()
+
         return jsonify(error=False, mensaje='Cajón abierto con éxito'), HTTP_STATUS_OK
-    except win32print.error as wp:
-        return jsonify(error=True, mensaje=f'Error al abrir el cajón: {str(wp)}'), HTTP_STATUS_SERVER_ERROR
     except Exception as e:
         return jsonify(error=True, mensaje=f'Error inesperado ac: {str(e)}'), HTTP_STATUS_SERVER_ERROR
+
 
 @app.route('/imprimirCorte', methods=['POST'])
 def imprimirCorte():
@@ -571,12 +672,13 @@ def imprimirCorte():
         data = request.json
         if not data:
             raise ValueError("Datos de impresión vacíos o no proporcionados.")
-        
-        validation_result = validate_cashier_cut_data(data)  # Almacena el resultado de la validación
-        
+
+        validation_result = validate_cashier_cut_data(
+            data)  # Almacena el resultado de la validación
+
         if validation_result['error']:
             return jsonify(error=True, mensaje=validation_result['mensaje']), HTTP_STATUS_SERVER_ERROR
-        
+
         # Continúa con la impresión solo si no hay errores de validación
         print_result = print_cashier_cut(data)
         if print_result['error']:
@@ -586,7 +688,8 @@ def imprimirCorte():
             printer_name = win32print.GetDefaultPrinter()
             handle = win32print.OpenPrinter(printer_name)
             open_drawer_command = b'\x1B\x70\x00\x19\xFA'
-            win32print.StartDocPrinter(handle, 1, ("Python_Print_Job", None, "RAW"))
+            win32print.StartDocPrinter(
+                handle, 1, ("Python_Print_Job", None, "RAW"))
             win32print.StartPagePrinter(handle)
             win32print.WritePrinter(handle, open_drawer_command)
             win32print.EndPagePrinter(handle)
@@ -603,5 +706,7 @@ def imprimirCorte():
     finally:
         if handle:
             win32print.ClosePrinter(handle)
+
+
 if __name__ == '__main__':
     app.run(host='localhost', port=3001, debug=False)
