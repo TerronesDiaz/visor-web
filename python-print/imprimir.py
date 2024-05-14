@@ -611,12 +611,25 @@ def open_drawer():
     win32print.EndDocPrinter(handle)
     win32print.ClosePrinter(handle)
 
+
+def handle_preflight():
+    #Función para manejar las solicitudes OPTIONS
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
+        response.headers['Access-Control-Allow-Methods'] = 'POST'
+        return response
+
 # Función para imprimir un ticket de venta
 
 
-@app.route('/imprimir', methods=['POST'])
+@app.route('/imprimir', methods=['POST', 'OPTIONS'])
 def imprimir():
     try:
+        preflight_response = handle_preflight()
+        if preflight_response:
+            return preflight_response
+
         data = request.json
         if not data:
             raise ValueError("Datos de impresión vacíos o no proporcionados.")
@@ -654,6 +667,10 @@ def imprimir():
 @app.route('/abrirCajon', methods=['POST'])
 def abrirCajon():
     try:
+        preflight = handle_preflight()
+        if preflight:
+            return preflight
+        
         data = request.json
         if not data or 'openDrawer' not in data or not data['openDrawer']:
             return jsonify(error=True, mensaje='Parámetro openDrawer no proporcionado o falso'), HTTP_STATUS_SERVER_ERROR
@@ -667,6 +684,11 @@ def abrirCajon():
 
 @app.route('/imprimirCorte', methods=['POST'])
 def imprimirCorte():
+    preflight = handle_preflight()
+    if preflight:
+        return preflight
+    
+
     handle = None
     try:
         data = request.json
