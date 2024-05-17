@@ -302,29 +302,29 @@ def print_receipt(data):
 
 def validate_data_structure_pwa(data):
     if not isinstance(data, dict):
-        return False
+        return False, "El dato principal no es un diccionario."
     if 'sections' not in data:
-        return False
+        return False, "Falta la clave 'sections' en el dato."
     sections = data['sections']
     if not isinstance(sections, list):
-        return False
-    for section in sections:
+        return False, "La clave 'sections' no es una lista."
+    for idx, section in enumerate(sections):
         if not isinstance(section, dict):
-            return False
+            return False, f"La sección en el índice {idx} no es un diccionario."
         if 'type' not in section:
-            return False
+            return False, f"Falta la clave 'type' en la sección en el índice {idx}."
         if section['type'] not in ['title', 'text', 'table']:
-            return False
+            return False, f"El valor de 'type' en la sección en el índice {idx} no es válido."
         if section['type'] == 'table':
             if 'columns' not in section:
-                return False
+                return False, f"Falta la clave 'columns' en la sección tipo 'table' en el índice {idx}."
             if not isinstance(section['columns'], list):
-                return False
+                return False, f"La clave 'columns' no es una lista en la sección tipo 'table' en el índice {idx}."
             if 'rows' not in section:
-                return False
+                return False, f"Falta la clave 'rows' en la sección tipo 'table' en el índice {idx}."
             if not isinstance(section['rows'], list):
-                return False
-    return True
+                return False, f"La clave 'rows' no es una lista en la sección tipo 'table' en el índice {idx}."
+    return True, "Estructura de datos válida."
 
 
 def print_receipt_pwa(data):
@@ -671,8 +671,9 @@ def imprimir():
 
         # Validate data structure
         if pwa:
-            if not validate_data_structure_pwa(data):
-                raise ValueError("Estructura de datos no válida.")
+            valido, mensaje = validate_data_structure_pwa(data['content'])
+            if not valido:
+                raise ValueError(f"Error de validación: {mensaje}")
         else:
             valido, mensaje = validar_datos(data)
             if not valido:
@@ -680,7 +681,7 @@ def imprimir():
 
         # Print receipt
         if pwa:
-            print_receipt_pwa(data)
+            print_receipt_pwa(data['content'])
         else:
             print_receipt(data)
 
