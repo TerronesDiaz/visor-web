@@ -335,6 +335,14 @@ def print_receipt_pwa(data):
             handle, 1, ("Python_Print_Job", None, "RAW"))
         win32print.StartPagePrinter(handle)
 
+        # Imprimir el logo
+        try:
+            logo_path = sys.argv[1]
+            logo_bytes = convert_image_to_bytes(logo_path)
+            win32print.WritePrinter(handle, logo_bytes)
+        except FileNotFoundError:
+            pass
+
         sections = data['sections']
 
         for section in sections:
@@ -350,18 +358,41 @@ def print_receipt_pwa(data):
                     handle, section['content'].encode('utf-8'))
             elif section['type'] == 'table':
                 column_headers = section['columns']
-                header_text = '\t'.join(column_headers)
-                win32print.WritePrinter(handle, header_text.encode('utf-8'))
-                for row in section['rows']:
-                    row_text = '\t'.join(row)
-                    win32print.WritePrinter(handle, row_text.encode('utf-8'))
+                rows = section['rows']
+
+                # Filtrar y reordenar las columnas si contiene 'DESC', 'desc', 'DESCRIPCION' o 'descripcion'
+                desc_index = None
+                filtered_headers = []
+                for index, header in enumerate(column_headers):
+                    if header.upper() in ['DESC', 'DESCRIPCION']:
+                        desc_index = index
+                    else:
+                        filtered_headers.append(header)
+                
+                # Imprimir los encabezados de las columnas filtradas
+                if filtered_headers:
+                    header_text = '\t'.join(filtered_headers)
+                    win32print.WritePrinter(handle, header_text.encode('utf-8'))
+                    win32print.WritePrinter(handle, b'\n')
+
+                # Imprimir las filas de la tabla
+                for row in rows:
+                    if desc_index is not None:
+                        desc_text = row[desc_index]
+                        win32print.WritePrinter(handle, desc_text.encode('utf-8'))
+                        win32print.WritePrinter(handle, b'\n')
+                    
+                    filtered_row = [item for index, item in enumerate(row) if index != desc_index]
+                    if filtered_row:
+                        row_text = '\t'.join(filtered_row)
+                        win32print.WritePrinter(handle, row_text.encode('utf-8'))
+                        win32print.WritePrinter(handle, b'\n')
 
         win32print.EndPagePrinter(handle)
         win32print.EndDocPrinter(handle)
         win32print.ClosePrinter(handle)
     except Exception as e:
         raise e
-
 
 # Configura el sistema de registro
 logging.basicConfig(filename='error_log_python.txt',
