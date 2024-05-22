@@ -331,8 +331,7 @@ def print_receipt_pwa(data):
     try:
         printer_name = win32print.GetDefaultPrinter()
         handle = win32print.OpenPrinter(printer_name)
-        job_id = win32print.StartDocPrinter(
-            handle, 1, ("Python_Print_Job", None, "RAW"))
+        job_id = win32print.StartDocPrinter(handle, 1, ("Python_Print_Job", None, "RAW"))
         win32print.StartPagePrinter(handle)
 
         # Imprimir el logo
@@ -343,19 +342,26 @@ def print_receipt_pwa(data):
         except FileNotFoundError:
             pass
 
+        # Definir el ancho del papel (por ejemplo, 40 caracteres)
+        paper_width = 40
+
+        def center_text(text, width):
+            return text.center(width)
+
+        def format_table_row(columns, widths):
+            return ''.join([col.ljust(width) for col, width in zip(columns, widths)])
+
         sections = data['sections']
 
         for section in sections:
             if section['type'] == 'title':
                 bold_on = b'\x1B\x45\x01'
                 win32print.WritePrinter(handle, bold_on)
-                win32print.WritePrinter(
-                    handle, section['content'].encode('utf-8'))
+                win32print.WritePrinter(handle, center_text(section['content'], paper_width).encode('utf-8'))
                 bold_off = b'\x1B\x45\x00'
                 win32print.WritePrinter(handle, bold_off)
             elif section['type'] == 'text':
-                win32print.WritePrinter(
-                    handle, section['content'].encode('utf-8'))
+                win32print.WritePrinter(handle, center_text(section['content'], paper_width).encode('utf-8'))
             elif section['type'] == 'table':
                 column_headers = section['columns']
                 rows = section['rows']
@@ -368,24 +374,28 @@ def print_receipt_pwa(data):
                         desc_index = index
                     else:
                         filtered_headers.append(header)
-                
+
+                # Definir los anchos de las columnas
+                col_width = paper_width // len(filtered_headers) if filtered_headers else paper_width
+                widths = [col_width] * len(filtered_headers)
+
                 # Imprimir los encabezados de las columnas filtradas
                 if filtered_headers:
-                    header_text = '\t'.join(filtered_headers)
-                    win32print.WritePrinter(handle, header_text.encode('utf-8'))
+                    header_text = format_table_row(filtered_headers, widths)
+                    win32print.WritePrinter(handle, center_text(header_text, paper_width).encode('utf-8'))
                     win32print.WritePrinter(handle, b'\n')
 
                 # Imprimir las filas de la tabla
                 for row in rows:
                     if desc_index is not None:
                         desc_text = row[desc_index]
-                        win32print.WritePrinter(handle, desc_text.encode('utf-8'))
+                        win32print.WritePrinter(handle, center_text(desc_text, paper_width).encode('utf-8'))
                         win32print.WritePrinter(handle, b'\n')
-                    
+
                     filtered_row = [item for index, item in enumerate(row) if index != desc_index]
                     if filtered_row:
-                        row_text = '\t'.join(filtered_row)
-                        win32print.WritePrinter(handle, row_text.encode('utf-8'))
+                        row_text = format_table_row(filtered_row, widths)
+                        win32print.WritePrinter(handle, center_text(row_text, paper_width).encode('utf-8'))
                         win32print.WritePrinter(handle, b'\n')
 
         win32print.EndPagePrinter(handle)
@@ -393,6 +403,7 @@ def print_receipt_pwa(data):
         win32print.ClosePrinter(handle)
     except Exception as e:
         raise e
+
 
 # Configura el sistema de registro
 logging.basicConfig(filename='error_log_python.txt',
