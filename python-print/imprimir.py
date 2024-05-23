@@ -80,9 +80,6 @@ def numero_a_palabras(numero):
     return resultado.strip()
 
 
-# Ejemplo de uso
-# Debería imprimir "DOSCIENTOS NOVENTA Y OCHO PESOS 00/100 M.N"
-print(numero_a_palabras(298))
 
 
 # Actualice el ancho del papel aquí
@@ -339,6 +336,7 @@ def print_receipt_pwa(data):
             logo_path = sys.argv[1]
             logo_bytes = convert_image_to_bytes(logo_path)
             win32print.WritePrinter(handle, logo_bytes)
+            win32print.WritePrinter(handle, b'\n\n')
         except FileNotFoundError:
             pass
 
@@ -356,12 +354,26 @@ def print_receipt_pwa(data):
         for section in sections:
             if section['type'] == 'title':
                 bold_on = b'\x1B\x45\x01'
-                win32print.WritePrinter(handle, bold_on)
-                win32print.WritePrinter(handle, center_text(section['content'], paper_width).encode('utf-8'))
                 bold_off = b'\x1B\x45\x00'
+                win32print.WritePrinter(handle, bold_on)
+                win32print.WritePrinter(handle, (center_text(section['content'], paper_width) + '\n').encode('utf-8'))
                 win32print.WritePrinter(handle, bold_off)
+                if 'divider' in section and section['divider']:
+                    win32print.WritePrinter(handle, b'-' * paper_width)
+                    win32print.WritePrinter(handle, b'\n')
             elif section['type'] == 'text':
-                win32print.WritePrinter(handle, center_text(section['content'], paper_width).encode('utf-8'))
+                if 'isBold' in section and section['isBold']:
+                    win32print.WritePrinter(handle, bold_on)
+
+                win32print.WritePrinter(handle, (center_text(section['content'], paper_width) + '\n').encode('utf-8'))
+
+                if 'isBold' in section and section['isBold']:
+                    win32print.WritePrinter(handle, bold_off)
+
+                if 'divider' in section and section['divider']:
+                    win32print.WritePrinter(handle, b'-' * paper_width)
+                    win32print.WritePrinter(handle, b'\n')
+
             elif section['type'] == 'table':
                 column_headers = section['columns']
                 rows = section['rows']
@@ -382,28 +394,29 @@ def print_receipt_pwa(data):
                 # Imprimir los encabezados de las columnas filtradas
                 if filtered_headers:
                     header_text = format_table_row(filtered_headers, widths)
-                    win32print.WritePrinter(handle, center_text(header_text, paper_width).encode('utf-8'))
-                    win32print.WritePrinter(handle, b'\n')
+                    win32print.WritePrinter(handle, (center_text(header_text, paper_width) + '\n').encode('utf-8'))
 
                 # Imprimir las filas de la tabla
                 for row in rows:
                     if desc_index is not None:
+                        win32print.WritePrinter(handle, bold_on)
                         desc_text = row[desc_index]
-                        win32print.WritePrinter(handle, center_text(desc_text, paper_width).encode('utf-8'))
-                        win32print.WritePrinter(handle, b'\n')
+                        win32print.WritePrinter(handle, (center_text(desc_text, paper_width) + '\n').encode('utf-8'))
 
                     filtered_row = [item for index, item in enumerate(row) if index != desc_index]
                     if filtered_row:
                         row_text = format_table_row(filtered_row, widths)
-                        win32print.WritePrinter(handle, center_text(row_text, paper_width).encode('utf-8'))
-                        win32print.WritePrinter(handle, b'\n')
+                        win32print.WritePrinter(handle, (center_text(row_text, paper_width) + '\n').encode('utf-8'))
+
+                if 'divider' in section and section['divider']:
+                    win32print.WritePrinter(handle, b'-' * paper_width)
+                    win32print.WritePrinter(handle, b'\n')
 
         win32print.EndPagePrinter(handle)
         win32print.EndDocPrinter(handle)
         win32print.ClosePrinter(handle)
     except Exception as e:
         raise e
-
 
 # Configura el sistema de registro
 logging.basicConfig(filename='error_log_python.txt',
