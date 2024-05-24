@@ -341,7 +341,7 @@ def print_receipt_pwa(data):
             pass
 
         # Definir el ancho del papel (por ejemplo, 40 caracteres)
-        paper_width = 40
+        paper_width = 50
 
         def center_text(text, width):
             return text.center(width)
@@ -412,6 +412,8 @@ def print_receipt_pwa(data):
                     win32print.WritePrinter(handle, b'-' * paper_width)
                     win32print.WritePrinter(handle, b'\n')
 
+            # Al final ponemos saltos para que se pueda cortar el papel
+            win32print.WritePrinter(handle, b'\n \n \n \n \n')
         win32print.EndPagePrinter(handle)
         win32print.EndDocPrinter(handle)
         win32print.ClosePrinter(handle)
