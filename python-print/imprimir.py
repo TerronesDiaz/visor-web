@@ -121,7 +121,7 @@ def validar_datos(data):
             return False, f"Falta el campo {campo}"
 
     # Validar el campo 'otros_datos'
-    otros_datos_requeridos = ['id_venta',
+    otros_datos_requeridos = ['folio',
                               'numeroCaja', 'cajero', 'cliente', 'fechaHora']
     for campo in otros_datos_requeridos:
         if campo not in data['otros_datos']:
@@ -184,7 +184,7 @@ def print_receipt(data):
             f"{'TELEFONO: ' + str(data['datosEmpresa']['telefono']).center(40)}\n"
             f"{'RFC: ' + data['datosEmpresa']['rfc'].center(40)}\n"
             f"{'------------------------------------------------'.center(40)}\n"
-            f"{'FOLIO: ' + data['otros_datos']['id_venta']}\n"
+            f"{'FOLIO: ' + data['otros_datos']['folio']}\n"
             f"{'CAJA: ' + data['otros_datos']['numeroCaja']}\n"
             f"{'CAJERO: ' + data['otros_datos']['cajero']}\n"
             f"{'CLIENTE: ' + data['otros_datos']['cliente']}\n"
@@ -341,7 +341,7 @@ def print_receipt_pwa(data):
             pass
 
         # Definir el ancho del papel (por ejemplo, 40 caracteres)
-        paper_width = 50
+        paper_width = 48
 
         def center_text(text, width):
             return text.center(width)
@@ -412,8 +412,8 @@ def print_receipt_pwa(data):
                     win32print.WritePrinter(handle, b'-' * paper_width)
                     win32print.WritePrinter(handle, b'\n')
 
-            # Al final ponemos saltos para que se pueda cortar el papel
-            win32print.WritePrinter(handle, b'\n \n \n \n \n')
+        # Al final ponemos saltos para que se pueda cortar el papel
+        win32print.WritePrinter(handle, b'\n \n \n \n \n')
         win32print.EndPagePrinter(handle)
         win32print.EndDocPrinter(handle)
         win32print.ClosePrinter(handle)
