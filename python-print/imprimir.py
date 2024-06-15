@@ -414,6 +414,8 @@ def print_receipt_pwa(data):
 
         # Al final ponemos saltos para que se pueda cortar el papel
         win32print.WritePrinter(handle, b'\n \n \n \n \n')
+        cut_paper_command = b"\x1D\x56\x00"
+        win32print.WritePrinter(handle, cut_paper_command)
         win32print.EndPagePrinter(handle)
         win32print.EndDocPrinter(handle)
         win32print.ClosePrinter(handle)
