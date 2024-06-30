@@ -21,68 +21,187 @@ HTTP_STATUS_OK = 200
 HTTP_STATUS_SERVER_ERROR = 500
 
 
-def numero_a_palabras(numero):
-    unidades = ('', 'UNO', 'DOS', 'TRES', 'CUATRO', 'CINCO', 'SEIS', 'SIETE', 'OCHO', 'NUEVE', 'DIEZ', 'ONCE',
-                'DOCE', 'TRECE', 'CATORCE', 'QUINCE', 'DIECISEIS', 'DIECISIETE', 'DIECIOCHO', 'DIECINUEVE', 'VEINTE')
-    decenas = ('', '', 'VEINTI', 'TREINTA', 'CUARENTA', 'CINCUENTA',
-               'SESENTA', 'SETENTA', 'OCHENTA', 'NOVENTA')
-    centenas = ('', 'CIENTO', 'DOSCIENTOS', 'TRESCIENTOS', 'CUATROCIENTOS',
-                'QUINIENTOS', 'SEISCIENTOS', 'SETECIENTOS', 'OCHOCIENTOS', 'NOVECIENTOS')
+# Ajuste de la función proporcionada
+MONEDA_SINGULAR = 'PESO'
+MONEDA_PLURAL = 'PESOS'
 
-    try:
-        n = int(numero)
-        centavos = int(100 * (numero - n))
-    except:
-        return "Error"
+CENTIMOS_SINGULAR = 'CENTAVO'
+CENTIMOS_PLURAL = 'CENTAVOS'
 
-    if n == 0:
-        return 'CERO PESOS %02d/100 M.N' % centavos
+MAX_NUMERO = 999999999999
 
+UNIDADES = (
+    'CERO',
+    'UNO',
+    'DOS',
+    'TRES',
+    'CUATRO',
+    'CINCO',
+    'SEIS',
+    'SIETE',
+    'OCHO',
+    'NUEVE'
+)
+
+DECENAS = (
+    'DIEZ',
+    'ONCE',
+    'DOCE',
+    'TRECE',
+    'CATORCE',
+    'QUINCE',
+    'DIECISEIS',
+    'DIECISIETE',
+    'DIECIOCHO',
+    'DIECINUEVE'
+)
+
+DIEZ_DIEZ = (
+    'CERO',
+    'DIEZ',
+    'VEINTE',
+    'TREINTA',
+    'CUARENTA',
+    'CINCUENTA',
+    'SESENTA',
+    'SETENTA',
+    'OCHENTA',
+    'NOVENTA'
+)
+
+CIENTOS = (
+    '_',
+    'CIENTO',
+    'DOSCIENTOS',
+    'TRESCIENTOS',
+    'CUATROCIENTOS',
+    'QUINIENTOS',
+    'SEISCIENTOS',
+    'SETECIENTOS',
+    'OCHOCIENTOS',
+    'NOVECIENTOS'
+)
+
+
+def numero_a_letras(numero):
+    numero_entero = int(numero)
+    if numero_entero > MAX_NUMERO:
+        raise OverflowError('Número demasiado alto')
+    if numero_entero < 0:
+        return 'MENOS %s' % numero_a_letras(abs(numero))
+    letras_decimal = ''
+    parte_decimal = int(round((abs(numero) - abs(numero_entero)) * 100))
+    if parte_decimal > 9:
+        letras_decimal = 'PUNTO %s' % numero_a_letras(parte_decimal)
+    elif parte_decimal > 0:
+        letras_decimal = 'PUNTO CERO %s' % numero_a_letras(parte_decimal)
+    if (numero_entero <= 99):
+        resultado = leer_decenas(numero_entero)
+    elif (numero_entero <= 999):
+        resultado = leer_centenas(numero_entero)
+    elif (numero_entero <= 999999):
+        resultado = leer_miles(numero_entero)
+    elif (numero_entero <= 999999999):
+        resultado = leer_millones(numero_entero)
+    else:
+        resultado = leer_millardos(numero_entero)
+    resultado = resultado.replace('UNO MIL', 'UN MIL')
+    resultado = resultado.strip()
+    resultado = resultado.replace(' _ ', ' ')
+    resultado = resultado.replace('  ', ' ')
+    if parte_decimal > 0:
+        resultado = '%s %s' % (resultado, letras_decimal)
+    return resultado
+
+
+def numero_a_moneda(numero):
+    numero_entero = int(numero)
+    parte_decimal = int(round((abs(numero) - abs(numero_entero)) * 100))
+    centimos = ''
+    if parte_decimal == 1:
+        centimos = CENTIMOS_SINGULAR
+    else:
+        centimos = CENTIMOS_PLURAL
+    moneda = ''
+    if numero_entero == 1:
+        moneda = MONEDA_SINGULAR
+    else:
+        moneda = MONEDA_PLURAL
+    letras = numero_a_letras(numero_entero)
+    letras = letras.replace('UNO', 'UN')
+    letras_decimal = '%02d/100 M.N' % parte_decimal
+    letras = '%s %s %s' % (letras, moneda, letras_decimal)
+    return letras
+
+
+def leer_decenas(numero):
+    if numero < 10:
+        return UNIDADES[numero]
+    decena, unidad = divmod(numero, 10)
+    if numero <= 19:
+        resultado = DECENAS[unidad]
+    elif numero <= 29:
+        resultado = 'VEINTI%s' % UNIDADES[unidad]
+    else:
+        resultado = DIEZ_DIEZ[decena]
+        if unidad > 0:
+            resultado = '%s Y %s' % (resultado, UNIDADES[unidad])
+    return resultado
+
+
+def leer_centenas(numero):
+    centena, decena = divmod(numero, 100)
+    if numero == 0:
+        resultado = 'CIEN'
+    else:
+        resultado = CIENTOS[centena]
+        if decena > 0:
+            resultado = '%s %s' % (resultado, leer_decenas(decena))
+    return resultado
+
+
+def leer_miles(numero):
+    millar, centena = divmod(numero, 1000)
     resultado = ''
-
-    # Manejar millones
-    if n >= 1000000:
-        millones = n // 1000000
-        n = n % 1000000
-        resultado += numero_a_palabras(millones) + \
-            ' MILLON' + ('ES ' if millones > 1 else ' ')
-
-    # Manejar miles
-    if n >= 1000:
-        miles = n // 1000
-        n = n % 1000
-        resultado += numero_a_palabras(miles) + ' MIL '
-
-    # Manejar centenas
-    if n >= 100:
-        c = n // 100
-        n = n % 100
-        resultado += centenas[c] + ' '
-
-    # Manejar decenas y unidades
-    if n >= 20:
-        d = n // 10
-        n = n % 10
-        resultado += decenas[d]
-        if n > 0:
-            resultado += ' Y ' + unidades[n] + ' '
-    else:
-        resultado += unidades[n] + ' '
-
-    resultado += 'PESOS '
-
-    # Manejar centavos
-    if centavos > 0:
-        resultado += '%02d/100 M.N' % centavos
-    else:
-        resultado += '00/100 M.N'
-
-    return resultado.strip()
+    if (millar == 1):
+        resultado = ''
+    if (millar >= 2) and (millar <= 9):
+        resultado = UNIDADES[millar]
+    elif (millar >= 10) and (millar <= 99):
+        resultado = leer_decenas(millar)
+    elif (millar >= 100) and (millar <= 999):
+        resultado = leer_centenas(millar)
+    resultado = '%s MIL' % resultado
+    if centena > 0:
+        resultado = '%s %s' % (resultado, leer_centenas(centena))
+    return resultado
 
 
+def leer_millones(numero):
+    millon, millar = divmod(numero, 1000000)
+    resultado = ''
+    if (millon == 1):
+        resultado = 'UN MILLON'
+    if (millon >= 2) and (millon <= 9):
+        resultado = UNIDADES[millon]
+    elif (millon >= 10) and (millon <= 99):
+        resultado = leer_decenas(millon)
+    elif (millon >= 100) and (millon <= 999):
+        resultado = leer_centenas(millon)
+    if millon > 1:
+        resultado = '%s MILLONES' % resultado
+    if (millar > 0) and (millar <= 999):
+        resultado = '%s %s' % (resultado, leer_centenas(millar))
+    elif (millar >= 1000) and (millar <= 999999):
+        resultado = '%s %s' % (resultado, leer_miles(millar))
+    return resultado
 
 
-# Actualice el ancho del papel aquí
+def leer_millardos(numero):
+    millardo, millon = divmod(numero, 1000000)
+    return '%s MILLONES %s' % (leer_miles(millardo), leer_millones(millon))
+
+
 def convert_image_to_bytes(image_path, paper_width=576):
     image = Image.open(image_path).convert("1")  # Convertir a monocromo
     im_width, im_height = image.size
@@ -180,8 +299,10 @@ def print_receipt(data):
         # Creación del encabezado utilizando los datos de 'data'
         header = (
             f"\n{data['datosEmpresa']['nombre_empresa'].center(40)}\n"
-            f"{('DOMICILIO: ' + data['datosEmpresa']['calle'] + ' ' + data['datosEmpresa']['numero'] + ', COL. ' + data['datosEmpresa']['colonia'] + ', ' + data        ['datosEmpresa']['municipio'] + ', ' + data['datosEmpresa']['estado']).center(40)}\n"
-            f"{'TELEFONO: ' + str(data['datosEmpresa']['telefono']).center(40)}\n"
+            f"{('DOMICILIO: ' + data['datosEmpresa']['calle'] + ' ' + data['datosEmpresa']['numero'] + ', COL. ' + data['datosEmpresa']
+                ['colonia'] + ', ' + data['datosEmpresa']['municipio'] + ', ' + data['datosEmpresa']['estado']).center(40)}\n"
+            f"{'TELEFONO: ' + str(data['datosEmpresa']
+                                  ['telefono']).center(40)}\n"
             f"{'RFC: ' + data['datosEmpresa']['rfc'].center(40)}\n"
             f"{'------------------------------------------------'.center(40)}\n"
             f"{'FOLIO: ' + data['otros_datos']['folio']}\n"
@@ -224,7 +345,7 @@ def print_receipt(data):
             f"{espacios_pzas}NO. PIEZAS:{no_piezas_formatted}"
             f"{espacios_total}TOTAL:${data['totales']['total']}\n"
             # Ponemos el total en palabras
-            f"{numero_a_palabras(float(data['totales']['total']))}\n"
+            f"{numero_a_moneda(float(data['totales']['total']))}\n"
             "------------------------------------------------\n"
             f"{bold_off.decode('latin1')}"
         )
@@ -233,7 +354,8 @@ def print_receipt(data):
             handle, totales.encode('utf-8'))  # Codifica en UTF-8
 
         # Método de Pago
-        pagos_header = f"{'Forma de Pago':<20}{'Importe':<10}{'Restante':<10}\n"
+        pagos_header = f"{'Forma de Pago':<20}{
+            'Importe':<10}{'Restante':<10}\n"
         win32print.WritePrinter(
             handle, pagos_header.encode('utf-8'))  # Codifica en UTF-8
 
@@ -328,7 +450,8 @@ def print_receipt_pwa(data):
     try:
         printer_name = win32print.GetDefaultPrinter()
         handle = win32print.OpenPrinter(printer_name)
-        job_id = win32print.StartDocPrinter(handle, 1, ("Python_Print_Job", None, "RAW"))
+        job_id = win32print.StartDocPrinter(
+            handle, 1, ("Python_Print_Job", None, "RAW"))
         win32print.StartPagePrinter(handle)
 
         # Imprimir el logo
@@ -356,7 +479,8 @@ def print_receipt_pwa(data):
                 bold_on = b'\x1B\x45\x01'
                 bold_off = b'\x1B\x45\x00'
                 win32print.WritePrinter(handle, bold_on)
-                win32print.WritePrinter(handle, (center_text(section['content'], paper_width) + '\n').encode('utf-8'))
+                win32print.WritePrinter(handle, (center_text(
+                    section['content'], paper_width) + '\n').encode('utf-8'))
                 win32print.WritePrinter(handle, bold_off)
                 if 'divider' in section and section['divider']:
                     win32print.WritePrinter(handle, b'-' * paper_width)
@@ -365,7 +489,8 @@ def print_receipt_pwa(data):
                 if 'isBold' in section and section['isBold']:
                     win32print.WritePrinter(handle, bold_on)
 
-                win32print.WritePrinter(handle, (center_text(section['content'], paper_width) + '\n').encode('utf-8'))
+                win32print.WritePrinter(handle, (center_text(
+                    section['content'], paper_width) + '\n').encode('utf-8'))
 
                 if 'isBold' in section and section['isBold']:
                     win32print.WritePrinter(handle, bold_off)
@@ -388,25 +513,30 @@ def print_receipt_pwa(data):
                         filtered_headers.append(header)
 
                 # Definir los anchos de las columnas
-                col_width = paper_width // len(filtered_headers) if filtered_headers else paper_width
+                col_width = paper_width // len(
+                    filtered_headers) if filtered_headers else paper_width
                 widths = [col_width] * len(filtered_headers)
 
                 # Imprimir los encabezados de las columnas filtradas
                 if filtered_headers:
                     header_text = format_table_row(filtered_headers, widths)
-                    win32print.WritePrinter(handle, (center_text(header_text, paper_width) + '\n').encode('utf-8'))
+                    win32print.WritePrinter(handle, (center_text(
+                        header_text, paper_width) + '\n').encode('utf-8'))
 
                 # Imprimir las filas de la tabla
                 for row in rows:
                     if desc_index is not None:
                         win32print.WritePrinter(handle, bold_on)
                         desc_text = row[desc_index]
-                        win32print.WritePrinter(handle, (center_text(desc_text, paper_width) + '\n').encode('utf-8'))
+                        win32print.WritePrinter(handle, (center_text(
+                            desc_text, paper_width) + '\n').encode('utf-8'))
 
-                    filtered_row = [item for index, item in enumerate(row) if index != desc_index]
+                    filtered_row = [item for index, item in enumerate(
+                        row) if index != desc_index]
                     if filtered_row:
                         row_text = format_table_row(filtered_row, widths)
-                        win32print.WritePrinter(handle, (center_text(row_text, paper_width) + '\n').encode('utf-8'))
+                        win32print.WritePrinter(handle, (center_text(
+                            row_text, paper_width) + '\n').encode('utf-8'))
 
                 if 'divider' in section and section['divider']:
                     win32print.WritePrinter(handle, b'-' * paper_width)
@@ -421,6 +551,7 @@ def print_receipt_pwa(data):
         win32print.ClosePrinter(handle)
     except Exception as e:
         raise e
+
 
 # Configura el sistema de registro
 logging.basicConfig(filename='error_log_python.txt',
@@ -540,8 +671,10 @@ def print_cashier_cut(data):
         # Impresión del encabezado
         header = (
             f"\n{data['datosEmpresa']['nombre_empresa'].center(40)}\n"
-            f"{('DOMICILIO: ' + data['datosEmpresa']['calle'] + ' ' + data['datosEmpresa']['numero'] + ', COL. ' + data['datosEmpresa']['colonia'] + ', ' + data['datosEmpresa']['municipio'] + ', ' + data['datosEmpresa']['estado']).center(40)}\n"
-            f"{'TELEFONO: ' + str(data['datosEmpresa']['telefono']).center(40)}\n"
+            f"{('DOMICILIO: ' + data['datosEmpresa']['calle'] + ' ' + data['datosEmpresa']['numero'] + ', COL. ' + data['datosEmpresa']
+                ['colonia'] + ', ' + data['datosEmpresa']['municipio'] + ', ' + data['datosEmpresa']['estado']).center(40)}\n"
+            f"{'TELEFONO: ' + str(data['datosEmpresa']
+                                  ['telefono']).center(40)}\n"
             f"{'RFC: ' + data['datosEmpresa']['rfc'].center(40)}\n"
             f"{'------------------------------------------------'.center(40)}\n"
             f"{'CORTE DE CAJA':<20}\n"
@@ -672,7 +805,7 @@ def open_drawer():
 
 
 def handle_preflight():
-    #Función para manejar las solicitudes OPTIONS
+    # Función para manejar las solicitudes OPTIONS
     if request.method == 'OPTIONS':
         response = app.make_default_options_response()
         response.headers['Access-Control-Allow-Headers'] = 'Content-Type'
@@ -730,7 +863,7 @@ def abrirCajon():
         preflight = handle_preflight()
         if preflight:
             return preflight
-        
+
         data = request.json
         if not data or 'openDrawer' not in data or not data['openDrawer']:
             return jsonify(error=True, mensaje='Parámetro openDrawer no proporcionado o falso'), HTTP_STATUS_SERVER_ERROR
@@ -747,7 +880,6 @@ def imprimirCorte():
     preflight = handle_preflight()
     if preflight:
         return preflight
-    
 
     handle = None
     try:
