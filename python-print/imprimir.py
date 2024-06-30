@@ -273,8 +273,7 @@ def print_receipt(data):
     try:
         printer_name = win32print.GetDefaultPrinter()
         handle = win32print.OpenPrinter(printer_name)
-        job_id = win32print.StartDocPrinter(
-            handle, 1, ("Python_Print_Job", None, "RAW"))
+        job_id = win32print.StartDocPrinter(handle, 1, ("Python_Print_Job", None, "RAW"))
         win32print.StartPagePrinter(handle)
 
         try:
@@ -299,11 +298,9 @@ def print_receipt(data):
         # Creación del encabezado utilizando los datos de 'data'
         header = (
             f"\n{data['datosEmpresa']['nombre_empresa'].center(40)}\n"
-            f"{('DOMICILIO: ' + data['datosEmpresa']['calle'] + ' ' + data['datosEmpresa']['numero'] + ', COL. ' + data['datosEmpresa']
-                ['colonia'] + ', ' + data['datosEmpresa']['municipio'] + ', ' + data['datosEmpresa']['estado']).center(40)}\n"
-            f"{'TELEFONO: ' + str(data['datosEmpresa']
-                                  ['telefono']).center(40)}\n"
-            f"{'RFC: ' + data['datosEmpresa']['rfc'].center(40)}\n"
+            f"{('DOMICILIO: ' + data['datosEmpresa']['calle'] + ' ' + data['datosEmpresa']['numero'] + ', COL. ' + data['datosEmpresa']['colonia'] + ', ' + data['datosEmpresa']['municipio'] + ', ' + data['datosEmpresa']['estado']).center(40)}\n"
+            f"{('TELEFONO: ' + str(data['datosEmpresa']['telefono'])).center(40)}\n"
+            f"{('RFC: ' + data['datosEmpresa']['rfc']).center(40)}\n"
             f"{'------------------------------------------------'.center(40)}\n"
             f"{'FOLIO: ' + data['otros_datos']['folio']}\n"
             f"{'CAJA: ' + data['otros_datos']['numeroCaja']}\n"
@@ -312,6 +309,7 @@ def print_receipt(data):
             f"{'FECHA Y HORA: ' + data['otros_datos']['fechaHora']}\n"
             f"{'------------------------------------------------'.center(40)}\n"
         )
+
         win32print.WritePrinter(handle, header.encode('utf-8'))
 
         for producto in data['productos']:
@@ -350,14 +348,11 @@ def print_receipt(data):
             f"{bold_off.decode('latin1')}"
         )
 
-        win32print.WritePrinter(
-            handle, totales.encode('utf-8'))  # Codifica en UTF-8
+        win32print.WritePrinter(handle, totales.encode('utf-8'))  # Codifica en UTF-8
 
         # Método de Pago
-        pagos_header = f"{'Forma de Pago':<20}{
-            'Importe':<10}{'Restante':<10}\n"
-        win32print.WritePrinter(
-            handle, pagos_header.encode('utf-8'))  # Codifica en UTF-8
+        pagos_header = f"{'Forma de Pago':<20}{'Importe':<10}{'Restante':<10}\n"
+        win32print.WritePrinter(handle, pagos_header.encode('utf-8'))  # Codifica en UTF-8
 
         # Inicializamos con el total de la venta
         total_restante = float(data['totales']['total'])
@@ -389,8 +384,7 @@ def print_receipt(data):
                     f"${total_restante:<10.2f}\n"
                 )
 
-            win32print.WritePrinter(
-                handle, pago_text.encode('utf-8'))  # Codifica en UTF-8
+            win32print.WritePrinter(handle, pago_text.encode('utf-8'))  # Codifica en UTF-8
 
             # Si era "Cambio", desactivamos el modo negrita y añadimos un espacio adicional
             if es_cambio:
@@ -401,12 +395,10 @@ def print_receipt(data):
         # Si existe data.concepto y no está vacío ni es null, lo imprimimos
         if 'concepto' in data and data['concepto']:
             concepto_text = f"CONCEPTO: {data['concepto']}\n"
-            win32print.WritePrinter(
-                handle, concepto_text.encode('utf-8'))  # Codifica en UTF-8
+            win32print.WritePrinter(handle, concepto_text.encode('utf-8'))  # Codifica en UTF-8
 
         extra_space = "\n" * 10  # Ajusta el número según tus necesidades
-        win32print.WritePrinter(
-            handle, extra_space.encode('utf-8'))  # Codifica en UTF-8
+        win32print.WritePrinter(handle, extra_space.encode('utf-8'))  # Codifica en UTF-8
 
         # Este comando es específico para ciertos modelos de Epson
         cut_paper_command = b"\x1D\x56\x00"
@@ -648,8 +640,7 @@ def print_cashier_cut(data):
         # Configuración inicial de la impresora
         printer_name = win32print.GetDefaultPrinter()
         handle = win32print.OpenPrinter(printer_name)
-        job_id = win32print.StartDocPrinter(
-            handle, 1, ("Python_Print_Job", None, "RAW"))
+        job_id = win32print.StartDocPrinter(handle, 1, ("Python_Print_Job", None, "RAW"))
         win32print.StartPagePrinter(handle)
 
         # Configuración de fuentes
@@ -671,11 +662,9 @@ def print_cashier_cut(data):
         # Impresión del encabezado
         header = (
             f"\n{data['datosEmpresa']['nombre_empresa'].center(40)}\n"
-            f"{('DOMICILIO: ' + data['datosEmpresa']['calle'] + ' ' + data['datosEmpresa']['numero'] + ', COL. ' + data['datosEmpresa']
-                ['colonia'] + ', ' + data['datosEmpresa']['municipio'] + ', ' + data['datosEmpresa']['estado']).center(40)}\n"
-            f"{'TELEFONO: ' + str(data['datosEmpresa']
-                                  ['telefono']).center(40)}\n"
-            f"{'RFC: ' + data['datosEmpresa']['rfc'].center(40)}\n"
+            f"{('DOMICILIO: ' + data['datosEmpresa']['calle'] + ' ' + data['datosEmpresa']['numero'] + ', COL. ' + data['datosEmpresa']['colonia'] + ', ' + data['datosEmpresa']['municipio'] + ', ' + data['datosEmpresa']['estado']).center(40)}\n"
+            f"{('TELEFONO: ' + str(data['datosEmpresa']['telefono'])).center(40)}\n"
+            f"{('RFC: ' + data['datosEmpresa']['rfc']).center(40)}\n"
             f"{'------------------------------------------------'.center(40)}\n"
             f"{'CORTE DE CAJA':<20}\n"
             f"{'TIPO DE CORTE: ' + data['tipo_corte']}\n"
@@ -698,8 +687,7 @@ def print_cashier_cut(data):
         for forma_pago in data['sumas_por_forma_pago']:
             forma_pago_total = forma_pago['suma_total']
             accumulated_total += float(forma_pago_total)
-            nombre_sin_acentos = quitar_acentos(
-                forma_pago['nombre_forma_pago'])
+            nombre_sin_acentos = quitar_acentos(forma_pago['nombre_forma_pago'])
             forma_pago_text = (
                 font_large_bold +
                 f"{nombre_sin_acentos.upper().center(40)}\n".encode('utf-8') +
@@ -707,10 +695,9 @@ def print_cashier_cut(data):
                 f"{'IEPS: ':<15}${forma_pago['suma_ieps']:>15}\n"
                 f"{'IVA: ':<15}${forma_pago['suma_iva']:>15}\n".encode('utf-8') +
                 font_large_bold +
-                f"{'TOTAL: ':<15}${forma_pago_total:>15} +   ${accumulated_total:>15}\n".encode('utf-8') +
+                f"{'TOTAL: ':<15}${forma_pago_total:>15}\n".encode('utf-8') +
                 font_normal +
-                f"{'------------------------------------------------'.center(40)}\n".encode(
-                    'utf-8')
+                f"{'------------------------------------------------'.center(40)}\n".encode('utf-8')
             )
             win32print.WritePrinter(handle, forma_pago_text)
     except Exception as e:
@@ -718,7 +705,7 @@ def print_cashier_cut(data):
         return {'error': True, 'mensaje': str(e)}
 
     try:
-       # Impresión de sumas generales
+        # Impresión de sumas generales
         sumas_generales = (
             font_large_bold +
             f"{'TOTAL'.center(40)}\n".encode('utf-8') +
@@ -731,8 +718,7 @@ def print_cashier_cut(data):
             font_large_bold +
             f"{'TOTAL + S. INI: ':<15}${data['sumas_generales']['total'] + data['saldo_inicial']}\n".encode('utf-8') +
             font_normal +
-            f"{'------------------------------------------------'.center(40)}\n".encode(
-                'utf-8')
+            f"{'------------------------------------------------'.center(40)}\n".encode('utf-8')
         )
         win32print.WritePrinter(handle, sumas_generales)
     except Exception as e:
@@ -749,8 +735,7 @@ def print_cashier_cut(data):
             f"{'IVA DEV: ':<15}${data['sumas_devoluciones']['iva']}\n".encode('utf-8') +
             f"{'IEPS DEV: ':<15}${data['sumas_devoluciones']['ieps']}\n".encode('utf-8') +
             f"{'TOTAL DEV: ':<15}${data['sumas_devoluciones']['total']}\n".encode('utf-8') +
-            f"{'------------------------------------------------'.center(40)}\n".encode(
-                'utf-8')
+            f"{'------------------------------------------------'.center(40)}\n".encode('utf-8')
         )
         win32print.WritePrinter(handle, sumas_devoluciones)
     except Exception as e:
@@ -768,8 +753,7 @@ def print_cashier_cut(data):
             f"{'IEPS: ':<15}${data['sumas_totales']['ieps']}\n".encode('utf-8') +
             f"{'TOTAL: ':<15}${data['sumas_totales']['total']}\n".encode('utf-8') +
             f"{'TOTAL + S INI: ':<15}${data['sumas_totales']['total'] + data['saldo_inicial']}\n".encode('utf-8') +
-            f"{'------------------------------------------------'.center(40)}\n".encode(
-                'utf-8')
+            f"{'------------------------------------------------'.center(40)}\n".encode('utf-8')
         )
         win32print.WritePrinter(handle, sumas_totales)
     except Exception as e:
