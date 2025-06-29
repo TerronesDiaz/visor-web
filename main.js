@@ -7,10 +7,8 @@ const puppeteer = require("puppeteer");
 const axios = require("axios");
 const { spawn } = require("child_process");
 const path = require('path');
-
-
 const { start } = require('./apiCajon/index');
-
+const { log } = require("console");
 
 // Lee las URLs desde appURLs.json
 function loadURLs() {
@@ -23,19 +21,16 @@ function loadURLs() {
   }
 }
 
-
 function runPythonScript(imagePath) {
-  // Si no se proporciona una ruta de imagen, utiliza la ruta de la imagen predeterminada
-  const imageToUse = imagePath || path.join(__dirname, 'python-print','media', 'img', 'picture.png');
-
+  const imageToUse = imagePath || path.join(__dirname, 'python-print', 'media', 'img', 'picture.png');
   executePythonScript(imageToUse);
 }
 
-
 function executePythonScript(imagePath) {
-  const scriptPath = path.join(process.resourcesPath, 'app.asar.unpacked', 'python-print', 'imprimir.py');
-
-
+  // Determina la ruta del script de Python según el entorno
+  const scriptPath = app.isPackaged
+    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'python-print', 'imprimir.py')
+    : path.join(__dirname, 'python-print', 'imprimir.py');
 
   const pythonProcess = spawn("python", [scriptPath, imagePath]);
 
@@ -56,27 +51,74 @@ function executePythonScript(imagePath) {
       logger.error(`El script de Python terminó con un error con el código: ${code}`);
     }
   });
+
+  pythonProcess.on("error", (error) => {
+    console.error(`Error al ejecutar el script de Python: ${error}`);
+    logger.error(`Error al ejecutar el script de Python: ${error}`);
+  });
 }
 
 function checkAndSelectImage(selectedURL) {
-  // Obtener el nombre de la tienda a partir de la URL
   const storeName = selectedURL.replace(/^https?:\/\//, '').replace(/\.[a-z]{2,}\/?$/, '');
-
-  // Define la ruta de imagen predeterminada en el directorio de datos del usuario
   const userDataPath = app.getPath('userData');
   const defaultImagePath = path.join(userDataPath, 'images', `${storeName}.png`);
 
-  return new Promise((resolve, reject) => {
-    // Verificar si la imagen existe en la ruta del directorio de datos del usuario
-    fs.access(defaultImagePath, fs.constants.F_OK, (err) => {
-      if (err) {
-        console.error("Error al acceder a la imagen:", err);
-        resolve(false); // Si hay un error, resolver a false
+  return new Promise((resolve) => {
+    // Verificar permisos de lectura del archivo antes de acceder a él
+    fs.access(defaultImagePath, fs.constants.R_OK, (accessErr) => {
+      if (accessErr) {
+        if (accessErr.code === 'EPERM' || accessErr.code === 'EACCES') {
+          console.error("Error de permisos al acceder a la imagen:", accessErr);
+          logger.error("Error de permisos al acceder a la imagen:", accessErr);
+        } else {
+          console.error("Error al acceder a la imagen (no existe):", accessErr);
+          logger.error("Error al acceder a la imagen (no existe):", accessErr);
+        }
+        resolve(false);
       } else {
-        resolve(defaultImagePath); // Si no hay error, resolver con la ruta de la imagen predeterminada
+        // Si tiene permisos de lectura, verificar si la imagen es válida
+        fs.readFile(defaultImagePath, (readErr, data) => {
+          if (readErr) {
+            console.error("Error al leer la imagen:", readErr);
+            logger.error("Error al leer la imagen:", readErr);
+            resolve(false);
+          } else if (!isValidImage(data)) {
+            logger.error("La imagen está perdida o corrupta.");
+            console.error("La imagen está perdida o corrupta.");
+            resolve(false);
+          } else {
+            logger.info("Imagen encontrada y válida:", defaultImagePath);
+            resolve(defaultImagePath);
+          }
+        });
       }
     });
   });
+}
+
+// Función para verificar si los datos corresponden a una imagen válida
+function isValidImage(data) {
+  if (!data || data.length < 4) {
+    return false; // Archivo demasiado pequeño para ser una imagen válida
+  }
+
+  const signatures = {
+    jpg: [0xff, 0xd8, 0xff],
+    png: [0x89, 0x50, 0x4e, 0x47],
+    gif: [0x47, 0x49, 0x46, 0x38],
+    bmp: [0x42, 0x4d],
+    webp: [0x52, 0x49, 0x46, 0x46],
+  };
+
+  const fileHeader = data.slice(0, 4);
+
+  for (const signature of Object.values(signatures)) {
+    if (signature.every((byte, index) => byte === fileHeader[index])) {
+      return true;
+    }
+  }
+
+  return false;
 }
 
 
@@ -84,7 +126,7 @@ function checkAndSelectImage(selectedURL) {
 const fsPromises = fs.promises;
 const configPath = './config.json';
 let userDownloadPath = '';
-var abierta = false;
+let abierta = false;
 
 // Load configuration at the start
 function loadConfig() {
@@ -101,7 +143,6 @@ function loadConfig() {
   }
 }
 
-// Save configuration
 function saveConfig() {
   try {
     fs.writeFileSync(configPath, JSON.stringify({ downloadPath: userDownloadPath }));
@@ -111,28 +152,25 @@ function saveConfig() {
   }
 }
 
-// Fetch image
-// Variable para rastrear si una búsqueda está en curso
 let isSearchInProgress = false;
 
 async function fetchImage(searchQuery) {
   if (isSearchInProgress) {
     return 'Another search is in progress';
   }
-  
+
   isSearchInProgress = true;
 
   try {
-    // Establecer un tiempo límite para la búsqueda
-    const timeout = new Promise((resolve, reject) => {
-      setTimeout(() => reject('Search timed out'), 10000); // 10 segundos
+    const timeout = new Promise((_, reject) => {
+      setTimeout(() => reject('Search timed out'), 10000);
     });
-    
+
     const search = (async () => {
       const browser = await puppeteer.launch({ headless: "new" });
       const page = await browser.newPage();
       await page.goto(`https://www.google.com/search?q=${searchQuery}&tbm=isch`);
-      
+
       const imageUrl = await page.evaluate(() => {
         return document.querySelector(".rg_i")?.src || null;
       });
@@ -161,11 +199,10 @@ async function fetchImage(searchQuery) {
   }
 }
 
-
-ipcMain.on('select-download-path', async (event, arg) => {
+ipcMain.on('select-download-path', async (event) => {
   try {
     const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
-    
+
     if (!result.canceled) {
       userDownloadPath = result.filePaths[0];
       saveConfig();
@@ -188,45 +225,32 @@ ipcMain.on('set-download-path', (event, path) => {
   }
 });
 
-// Perform search
 ipcMain.on('perform-search', async (event, searchQuery) => {
   console.log(`Performing search for: ${searchQuery}`);
   try {
-    await fetchImage(searchQuery);
-    event.sender.send("download-success", "Image successfully downloaded.");
+    const message = await fetchImage(searchQuery);
+    event.sender.send("download-success", message);
   } catch (error) {
     console.error('Error in perform-search:', error);
     event.sender.send("download-error", "Error downloading image.");
   }
 });
 
-// Load config at the beginning
 loadConfig();
 
-
-ipcMain.on('close-window', (event, arg) => {
+ipcMain.on('close-window', (event) => {
   const win = BrowserWindow.getFocusedWindow();
-
-  // Agregar un temporizador de 1 segundo (1000 milisegundos)
   setTimeout(() => {
-    // Establecer abierta = false después del retraso
     abierta = false;
-    
-    // Cerrar la ventana
     win.close();
-  }, 1000); // Cambia el valor (en milisegundos) según tus necesidades
+  }, 1000);
 });
 
-
-
-
-// Crea un directorio para los archivos de registro si no existe
 const logDirectory = "./logs";
 if (!fs.existsSync(logDirectory)) {
   fs.mkdirSync(logDirectory);
 }
 
-// Configuración de winston para registrar en un archivo
 const logFileName = `${logDirectory}/app.log`;
 const logger = winston.createLogger({
   level: "info",
@@ -239,7 +263,6 @@ const logger = winston.createLogger({
   transports: [new winston.transports.File({ filename: logFileName })],
 });
 
-// Registrar en la consola durante el desarrollo
 if (process.env.NODE_ENV !== "production") {
   logger.add(
     new winston.transports.Console({
@@ -250,7 +273,6 @@ if (process.env.NODE_ENV !== "production") {
 
 logger.info("Inicio del script.");
 
-// Función para crear una nueva ventana
 function createWindow(url) {
   logger.info("Creando nueva ventana.");
 
@@ -261,85 +283,112 @@ function createWindow(url) {
       nodeIntegration: true,
     },
     kiosk: true,
-  });
+});
 
-  win.loadURL(url).then(() => {
-    win.webContents.session
-      .clearCache()
-      .then(() => {
+
+  logger.info("Ventana de navegador creada con configuración inicial.");
+
+  win.loadURL(url)
+    .then(() => {
+        logger.info(`URL cargada exitosamente: ${url}`);
+        return win.webContents.session.clearCache();
+    })
+    .then(() => {
         logger.info("Caché eliminado exitosamente.");
-      })
-      .catch((err) => {
-        logger.error("Error al eliminar el caché:", err);
-      });
+    })
+    .catch((error) => {
+        logger.error(`Error al cargar la URL ${url} o al eliminar caché:`, error);
+        app.quit();
+    });
+
+  win.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+      logger.error(`Error ${errorCode} cargando ${validatedURL}: ${errorDescription}`);
+      app.quit();
   });
 
   win.webContents.on("before-input-event", (event, input) => {
-    logger.info("Evento de entrada detectado:", input.key);
 
-    if (input.key === "F12") {
-      logger.info("Tecla F12 presionada. Saliendo...");
-      win.setKiosk(false);
-      app.quit();
-    }
-
-    if (input.key === "F8") {
-      logger.info("Tecla F8 presionada. Abriendo DevTools...");
-      win.webContents.openDevTools();
-    }
-
-    if (input.key === "F7") {
-      logger.info("Tecla F7 presionada.");
-
-      if (abierta) {
-        logger.info("Cerrando ventana de búsqueda...");
-        searchWin.close();
-        abierta = false;
-      } else if (!abierta) {
-        logger.info("Abriendo ventana de búsqueda...");
-        searchWin = new BrowserWindow({
-          width: 800,
-          height: 600,
-          webPreferences: {
-            nodeIntegration: true,
-            contextIsolation: false, 
-            sandbox: false, // Desactiva el modo sandbox
-          },
-        });
-
-
-
-        searchWin
-          .loadFile("./vistas/searchForm.html") 
-          .then(() => {
-            logger.info("Archivo HTML cargado exitosamente.");
-          })
-          .catch((err) => {
-            logger.error("Error al cargar el archivo HTML:", err);
-          });
+      if (input.key === "F12") {
+          logger.info("Tecla F12 presionada. Saliendo del modo kiosco y cerrando la aplicación...");
+          win.setKiosk(false);
+          app.quit();
       }
-    }
 
-    // Escucha el evento IPC para realizar la búsqueda
-    ipcMain.on("perform-search", async (event, searchQuery) => {
-      // Aquí puedes colocar la función para hacer el fetch y descargar la imagen
-      await fetchImage(searchQuery);
-    });
+      if (input.key === "F8") {
+          logger.info("Tecla F8 presionada. Abriendo DevTools...");
+          win.webContents.openDevTools();
+          logger.info("DevTools abierto.");
+      }
+
+      if (input.key === "F7") {
+          logger.info("Tecla F7 presionada. Alternando ventana de búsqueda.");
+          if (abierta) {
+              logger.info("Ventana de búsqueda ya está abierta. Procediendo a cerrar...");
+              searchWin.close();
+              abierta = false;
+              logger.info("Ventana de búsqueda cerrada.");
+          } else {
+              logger.info("Ventana de búsqueda no está abierta. Procediendo a abrir...");
+              searchWin = new BrowserWindow({
+                  width: 800,
+                  height: 600,
+                  webPreferences: {
+                      nodeIntegration: true,
+                      contextIsolation: false,
+                      sandbox: false,
+                      webSecurity: false,
+                  },
+              });
+
+              logger.info("Nueva ventana de búsqueda creada.");
+
+              searchWin.loadFile("./vistas/searchForm.html")
+                .then(() => {
+                    logger.info("Archivo HTML para búsqueda cargado exitosamente.");
+                })
+                .catch((err) => {
+                    logger.error("Error al cargar el archivo HTML de búsqueda:", err);
+                });
+          }
+      }
   });
+
+  logger.info("Configuración de eventos de la ventana completada.");
+}
+
+
+function createURLSelectorWindow(urls) {
+  const urlSelectorWindow = new BrowserWindow({
+    width: 800,
+    height: 800,
+    webPreferences: {
+        nodeIntegration: true,
+        contextIsolation: false,
+        webSecurity: false,
+    },
+  });
+
+  urlSelectorWindow.loadFile(path.join(__dirname, 'vistas', 'urlSelector.html'));
+
+  urlSelectorWindow.webContents.on('did-finish-load', () => {
+    urlSelectorWindow.webContents.send('load-urls', urls);
+  });
+
+  return urlSelectorWindow;
 }
 
 function createImageSelectionWindow(selectedURL) {
   const storeName = selectedURL.replace(/^https?:\/\//, '').replace(/\.[a-z]{2,}\/?$/, '');
-  return new Promise((resolve, reject) => {
-    let win = new BrowserWindow({
+  return new Promise((resolve) => {
+    const win = new BrowserWindow({
       width: 800,
       height: 600,
       webPreferences: {
         nodeIntegration: true,
-        contextIsolation: false
+        contextIsolation: false,
       },
       resizable: false,
-      closable: true
+      closable: true,
     });
 
     let imageSelected = false;
@@ -350,14 +399,14 @@ function createImageSelectionWindow(selectedURL) {
       imageSelected = true;
       win.close();
 
-      const userDataPath = app.getPath('userData'); // Obtiene la ruta del directorio de datos del usuario
-      const imageDirPath = path.join(userDataPath, 'images'); // Define el directorio de imágenes
+      const userDataPath = app.getPath('userData');
+      const imageDirPath = path.join(userDataPath, 'images');
       if (!fs.existsSync(imageDirPath)) {
-        fs.mkdirSync(imageDirPath, { recursive: true }); // Crea el directorio si no existe
+        fs.mkdirSync(imageDirPath, { recursive: true });
       }
-      const savedImagePath = path.join(imageDirPath, `${storeName}.png`); // Define la ruta de la imagen guardada
+      const savedImagePath = path.join(imageDirPath, `${storeName}.png`);
       const imageBuffer = fs.readFileSync(imagePath);
-      fs.writeFileSync(savedImagePath, imageBuffer); // Escribe el buffer de imagen en la ruta de la imagen guardada
+      fs.writeFileSync(savedImagePath, imageBuffer);
 
       resolve(savedImagePath);
     });
@@ -370,11 +419,10 @@ function createImageSelectionWindow(selectedURL) {
   });
 }
 
-
 app.whenReady().then(async () => {
-  start(); 
+  start();
   logger.info("Aplicación lista. Inicializando autoUpdater.");
-  autoUpdater.autoDownload = true; // Activa la descarga automática de actualizaciones
+  autoUpdater.autoDownload = true;
   autoUpdater.checkForUpdatesAndNotify();
 
   autoUpdater.on("checking-for-update", () => {
@@ -386,7 +434,7 @@ app.whenReady().then(async () => {
   });
 
   autoUpdater.on("update-not-available", (info) => {
-    logger.info("No hay ninguna actualizaciones disponible actualmente:", info);
+    logger.info("No hay ninguna actualización disponible actualmente:", info);
   });
 
   autoUpdater.on("update-downloaded", (info) => {
@@ -394,14 +442,12 @@ app.whenReady().then(async () => {
     const win = BrowserWindow.getFocusedWindow();
     if (win) {
       win.webContents.session.clearCache().then(() => {
-        dialog
-          .showMessageBox({
-            title: "Actualización descargada",
-            message: `Se ha descargado una nueva actualización. La versión actual es ${info.version}. La aplicación se reiniciará para aplicar los cambios.`,
-          })
-          .then(() => {
-            autoUpdater.quitAndInstall();
-          });
+        dialog.showMessageBox({
+          title: "Actualización descargada",
+          message: `Se ha descargado una nueva actualización. La versión actual es ${info.version}. La aplicación se reiniciará para aplicar los cambios.`,
+        }).then(() => {
+          autoUpdater.quitAndInstall();
+        });
       });
     }
   });
@@ -411,67 +457,78 @@ app.whenReady().then(async () => {
   });
 
   const urls = loadURLs();
-  let selectedURL;
+  var selectedURL;
 
   if (urls && urls.length > 0) {
     if (urls.length > 1) {
-      const options = {
-        type: "question",
-        buttons: urls,
-        title: "Seleccione una URL",
-        message: "¿A cuál de sus tiendas desea acceder?",
-      };
+      const urlSelectorWindow = createURLSelectorWindow();
   
-      const userChoice = await dialog.showMessageBox(options);
-      if (userChoice.response !== -1) {
-        selectedURL = urls[userChoice.response];
-      } else {
-        console.log("No se seleccionó ninguna URL. Cerrando aplicación.");
-        app.quit();
-        return; // Agrega este return para asegurarte de que no se ejecute más código después de cerrar la app.
-      }
+      // Enviar las URLs al proceso de renderizado cuando la ventana haya terminado de cargar
+      urlSelectorWindow.webContents.on('did-finish-load', () => {
+        urlSelectorWindow.webContents.send('load-urls', urls);
+      });
+  
+      selectedURL = await new Promise((resolve) => {
+        ipcMain.once('url-selected', (event, url) => {
+          resolve(url);
+          console.log("URL seleccionada:", url);
+          //Cerrar después de 2 segundos
+          setTimeout(() => {
+            urlSelectorWindow.close();
+          }, 500);
+        });
+  
+        urlSelectorWindow.on('closed', () => {
+          if (!selectedURL) {
+            console.log("No se seleccionó ninguna URL. Cerrando aplicación.");
+            resolve(null);
+            app.quit();
+          }
+        });
+      });
+  
+      if (!selectedURL) return;
+  
     } else {
       selectedURL = urls[0];
     }
   } else {
     console.log("No hay URLs disponibles. Cerrando aplicación.");
     app.quit();
-    return; // Agrega este return para asegurarte de que no se ejecute más código después de cerrar la app.
+    return;
   }
 
   try {
-    //Verifica si ya existe el path de la imagen
     const defaultImagePath = await checkAndSelectImage(selectedURL);
+    logger.info("Imagen predeterminada seleccionada:", defaultImagePath);
     let imagePath;
-    if(!defaultImagePath) {
-      imagePath = await createImageSelectionWindow(selectedURL); // Espera a que se seleccione la imagen
-    }else{
-      imagePath = defaultImagePath;
-    }
-    // Si se proporciona una ruta de imagen, ejecuta el script de Python y crea la ventana principal
-    if (imagePath) {
+    if (!defaultImagePath) {
+      logger.info("No se encontró ninguna imagen predeterminada.");
+      imagePath = await createImageSelectionWindow(selectedURL);
       logger.info("Imagen seleccionada:", imagePath);
-      runPythonScript(imagePath); // Ejecuta el script de Python con la ruta de la imagen
-      createWindow(selectedURL); // Crea la ventana principal después de seleccionar la imagen
     } else {
-      // Si no se seleccionó ninguna imagen, registra un error y cierra la aplicación
-      logger.error("No se seleccionó ninguna imagen.");
-      app.quit();
+      imagePath = defaultImagePath;
+      logger.info("Imagen predeterminada seleccionada!:", imagePath);
+    }
+
+    if (imagePath) {
+      logger.info("Imagen seleccionada!:", imagePath);
+      runPythonScript(imagePath);
+      createWindow(selectedURL);
+    } else {
+      logger.error("No se seleccionó ninguna imagen!!.");
+      runPythonScript(imagePath);
+      createWindow(selectedURL);
     }
   } catch (error) {
-    // Si ocurre un error durante la selección de la imagen, regístralo y cierra la aplicación
     logger.error("Error en la selección de imagen:", error);
-    app.quit();
+    imagePath = await createImageSelectionWindow(selectedURL);
+    logger.info("Imagen seleccionada after error:", imagePath);
+    runPythonScript(imagePath);
+    createWindow(selectedURL);
   }
-  
 });
 
-app.on("window-all-closed", () => {
-  logger.info("Todas las ventanas están cerradas. Saliendo...");
-  if (process.platform !== "darwin") {
-    app.quit();
-  }
-});
 
 app.on("activate", () => {
   logger.info("Aplicación activada.");
@@ -480,6 +537,9 @@ app.on("activate", () => {
   }
 });
 
-
-
 logger.info("Fin del script.");
+
+// Manejar globalmente las promesas no gestionadas
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});

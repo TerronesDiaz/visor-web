@@ -1,6 +1,6 @@
 {
   "name": "visor-web",
-  "version": "1.5.2",
+  "version": "1.5.5",
   "description": "Programa para abrir el POS en la web",
   "scripts": {
     "start": "electron main.js",
@@ -15,7 +15,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://terronescolima.com/lanzamientos/"
+        "url": "https://terrones.click/lanzamientos/"
       }
     ],
     "files": [
@@ -52,6 +52,7 @@
     "node-thermal-printer": "^4.4.0",
     "puppeteer": "^21.3.4",
     "sweetalert2": "^11.6.13",
+    "visor-web": "file:",
     "winston": "^3.10.0"
   },
   "main": "main.js"

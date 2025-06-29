@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Seleccione una URL</title>
+    <!-- Incluye Bootstrap para estilizar (opcional) -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Incluye Bootstrap Icons para los íconos -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+    <style>
+        .container {
+            text-align: center;
+            margin-top: 50px;
+        }
+        .card-container {
+            border: 2px solid #ddd; /* Borde alrededor del contenedor */
+            padding: 20px;
+            border-radius: 10px; /* Bordes redondeados para el contenedor */
+        }
+        .card-custom {
+            margin-bottom: 40px; /* Espacio adicional entre tarjetas */
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+        .card-custom:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+        }
+        .highlight {
+            font-weight: bold;
+            color: #8B0000; /* Un rojo más oscuro */
+        }
+        .bi {
+            font-size: 2rem; /* Incrementa el tamaño del ícono */
+            margin-bottom: 10px;
+        }
+        .btn-custom {
+            transition: background-color 0.3s ease, color 0.3s ease;
+        }
+        .btn-custom:hover {
+            background-color: #0056b3;
+            color: #fff;
+        }
+        h2 {
+            font-size: 2.5rem; /* Tamaño más grande para el título */
+            color: #333;
+            margin-bottom: 20px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Seleccione una Tienda</h2>
+        <div class="card-container"> <!-- Nuevo div contenedor con bordes -->
+            <div id="url-buttons" class="row justify-content-center">
+                <!-- Las tarjetas se generarán dinámicamente aquí -->
+            </div>
+        </div>
+    </div>
+    <script>
+        const { ipcRenderer } = require('electron');
+
+        // Función para obtener el subdominio o el dominio principal sin la extensión
+        function getDomainOrSubdomain(url) {
+            try {
+                const hostname = new URL(url).hostname; // Extrae el hostname de la URL
+                const parts = hostname.split('.'); // Divide el hostname por puntos
+
+                if (parts.length === 2) {
+                    // Si solo hay dos partes, es un dominio principal (por ejemplo, dominio.com)
+                    return parts[0]; // Retorna solo el nombre de dominio
+                } else if (parts.length > 2) {
+                    // Si hay más de dos partes, extrae el subdominio
+                    return parts.slice(0, -2).join('.'); // Retorna solo el subdominio
+                }
+            } catch (error) {
+                console.error('Error al procesar la URL:', url, error);
+                return url; // Si hay un error, retorna la URL completa como fallback
+            }
+        }
+
+        // Escucha el evento para cargar las URLs
+        ipcRenderer.on('load-urls', (event, urls) => {
+            const urlButtonsContainer = document.getElementById('url-buttons');
+            urls.forEach(url => {
+                const displayText = getDomainOrSubdomain(url); // Obtiene el texto a mostrar
+
+                const card = document.createElement('div');
+                card.className = 'card card-custom col-md-4 mx-2'; /* Clase mx-2 para espacio horizontal */
+
+                // Verifica si el subdominio es "tunkitos" para aplicar el estilo resaltado
+                const titleClass = displayText === "tunkitos" ? 'highlight' : '';
+
+                const cardBody = `
+                    <div class="card-body text-center">
+                        <i class="bi bi-globe"></i> <!-- Ícono de Bootstrap -->
+                        <h5 class="card-title ${titleClass}">${displayText}</h5>
+                        <button class="btn btn-primary btn-custom">Seleccionar</button>
+                    </div>
+                `;
+
+                card.innerHTML = cardBody;
+                const button = card.querySelector('button');
+                button.onclick = () => {
+                    ipcRenderer.send('url-selected', url); // Enviar URL seleccionada al proceso principal
+                    // Cerrar la ventana actual
+                    const currentWindow = require('electron').remote.getCurrentWindow();
+                    currentWindow.close();
+                };
+
+                urlButtonsContainer.appendChild(card);
+            });
+        });
+    </script>
+</body>
+</html>

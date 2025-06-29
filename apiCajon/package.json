@@ -11,6 +11,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "apicajon": "file:",
     "cors": "^2.8.5",
     "node-thermal-printer": "^4.4.0"
   },
