@@ -1,7 +1,7 @@
 {
   "name": "visor-web",
-  "version": "1.5.5",
-  "description": "Programa para abrir el POS en la web",
+  "version": "1.5.6",
+  "description": "Programa para abrir el POS en la web e imprimir tickets",
   "scripts": {
     "start": "electron main.js",
     "build": "electron-builder --dir .",

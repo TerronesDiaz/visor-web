@@ -8,6 +8,7 @@ import unicodedata
 from PIL import Image
 import sys
 import datetime
+from datetime import datetime, timedelta
 
 
 def quitar_acentos(texto):
@@ -358,6 +359,10 @@ def print_receipt(data):
         total_restante = float(data['totales']['total'])
         # Obtenemos el número total de pagos
         num_pagos = len(data['metodoPago'])
+        
+        # Variable para verificar si hay pago a crédito
+        hay_credito = False
+        monto_credito = 0.0
 
         for index, pago in enumerate(data['metodoPago']):
             importe_pago = float(pago['importe'])
@@ -365,6 +370,12 @@ def print_receipt(data):
 
             # Verificamos si el método de pago es "Cambio" o "cambio"
             es_cambio = pago['metodoPago'].lower() == 'cambio'
+            
+            # Verificamos si el método de pago es "Crédito" o "credito"
+            es_credito = quitar_acentos(pago['metodoPago'].lower()) == 'credito'
+            if es_credito:
+                hay_credito = True
+                monto_credito = importe_pago
 
             # Si es "Cambio", activamos el modo negrita y añadimos un espacio adicional
             if es_cambio:
@@ -391,6 +402,42 @@ def print_receipt(data):
                 win32print.WritePrinter(handle, bold_off)
                 extra_space = "\n"  # Añade tantos saltos de línea como desees
                 win32print.WritePrinter(handle, extra_space.encode('utf-8'))
+
+        # Si hay pago a crédito, imprimir la leyenda para firma del cliente
+        if hay_credito:
+            cliente_nombre = data['otros_datos']['cliente']
+            acreedor = data['datosEmpresa']['nombre_empresa'] if 'datosEmpresa' in data and 'nombre_empresa' in data['datosEmpresa'] else 'ACREEDOR'
+            domicilio_acreedor = (
+                f"{data['datosEmpresa'].get('calle', '')} {data['datosEmpresa'].get('numero', '')}, "
+                f"Col. {data['datosEmpresa'].get('colonia', '')}, "
+                f"{data['datosEmpresa'].get('municipio', '')}, {data['datosEmpresa'].get('estado', '')}"
+            ) if 'datosEmpresa' in data else 'DOMICILIO DEL ACREEDOR'
+            
+            fecha_emision = ''
+            fecha_vencimiento = ''
+            if 'diasCredito' in data and data['diasCredito']:
+                fecha_venta_str = data['otros_datos']['fechaHora']
+                fecha_emision = fecha_venta_str.split(' - ')[0]
+                fecha_venta = datetime.strptime(fecha_emision, '%d/%m/%Y')
+                fecha_venc = fecha_venta + timedelta(days=int(data['diasCredito']))
+                fecha_vencimiento = fecha_venc.strftime('%d/%m/%Y')
+            else:
+                fecha_venta_str = data['otros_datos']['fechaHora']
+                fecha_emision = fecha_venta_str.split(' - ')[0]
+                fecha_vencimiento = '---'
+            
+            cantidad_letra = numero_a_moneda(monto_credito)
+            
+            texto_pagare = (
+                "PAGARÉ\n\n"
+                f"En {domicilio_acreedor} a {fecha_vencimiento}.\n\n"
+                f"Por medio del presente título de crédito yo, {cliente_nombre} (en lo sucesivo referido como \"LA PARTE DEUDORA\"), hago constar que debo y pagaré de manera incondicional y sin excepción alguna la cantidad de ${monto_credito:,.2f} ({cantidad_letra}) a la orden de {acreedor} (en lo sucesivo referido como \"LA PARTE BENEFICIARIA\"), con domicilio ubicado en: {domicilio_acreedor}.\n\n"
+                f"El pago de la cantidad monetaria total adeudada al amparo del presente pagaré deberá ser efectuado por \"LA PARTE DEUDORA\" a \"LA PARTE BENEFICIARIA\" el día {fecha_vencimiento}.\n\n"
+                f"El pago deberá ser realizado en efectivo en el domicilio con la siguiente dirección: {domicilio_acreedor}.\n\n"
+                "______________________________\n"
+                "ACEPTO Y ME OBLIGO AL PAGO\n"
+            )
+            win32print.WritePrinter(handle, texto_pagare.encode('utf-8'))
 
         # Si existe data.concepto y no está vacío ni es null, lo imprimimos
         if 'concepto' in data and data['concepto']:
