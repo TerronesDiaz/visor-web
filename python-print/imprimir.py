@@ -405,12 +405,12 @@ def print_receipt(data):
 
         # Si hay pago a crédito, imprimir la leyenda para firma del cliente
         if hay_credito:
-            cliente_nombre = data['otros_datos']['cliente']
-            acreedor = data['datosEmpresa']['nombre_empresa'] if 'datosEmpresa' in data and 'nombre_empresa' in data['datosEmpresa'] else 'ACREEDOR'
+            cliente_nombre = quitar_acentos(data['otros_datos']['cliente'])
+            acreedor = quitar_acentos(data['datosEmpresa']['nombre_empresa']) if 'datosEmpresa' in data and 'nombre_empresa' in data['datosEmpresa'] else 'ACREEDOR'
             domicilio_acreedor = (
-                f"{data['datosEmpresa'].get('calle', '')} {data['datosEmpresa'].get('numero', '')}, "
-                f"Col. {data['datosEmpresa'].get('colonia', '')}, "
-                f"{data['datosEmpresa'].get('municipio', '')}, {data['datosEmpresa'].get('estado', '')}"
+                f"{quitar_acentos(data['datosEmpresa'].get('calle', ''))} {data['datosEmpresa'].get('numero', '')}, "
+                f"Col. {quitar_acentos(data['datosEmpresa'].get('colonia', ''))}, "
+                f"{quitar_acentos(data['datosEmpresa'].get('municipio', ''))}, {quitar_acentos(data['datosEmpresa'].get('estado', ''))}"
             ) if 'datosEmpresa' in data else 'DOMICILIO DEL ACREEDOR'
             
             fecha_emision = ''
@@ -630,12 +630,12 @@ def validate_cashier_cut_data(data):
 
         # Intenta normalizar el formato de la fecha y la hora
         try:
-            fecha_dt = datetime.datetime.strptime(
+            fecha_dt = datetime.strptime(
                 data['fecha_corte'], '%Y-%m-%d')
             data['fecha_corte'] = fecha_dt.strftime('%d-%m-%Y')
         except ValueError:
             try:
-                fecha_dt = datetime.datetime.strptime(
+                fecha_dt = datetime.strptime(
                     data['fecha_corte'], '%d-%m-%Y')
                 data['fecha_corte'] = fecha_dt.strftime('%d-%m-%Y')
             except ValueError:
@@ -644,11 +644,11 @@ def validate_cashier_cut_data(data):
                 return {'error': True, 'mensaje': "Formato de fecha incorrecto. No se puede transformar a DD-MM-YYYY."}
 
         try:
-            hora_dt = datetime.datetime.strptime(data['hora_corte'], '%H:%M')
+            hora_dt = datetime.strptime(data['hora_corte'], '%H:%M')
             data['hora_corte'] = hora_dt.strftime('%I:%M %p')
         except ValueError:
             try:
-                hora_dt = datetime.datetime.strptime(
+                hora_dt = datetime.strptime(
                     data['hora_corte'], '%I:%M %p')
                 data['hora_corte'] = hora_dt.strftime('%I:%M %p')
             except ValueError:
