@@ -1,6 +1,6 @@
 {
   "name": "visor-web",
-  "version": "1.5.8",
+  "version": "1.5.9",
   "description": "Programa para abrir el POS en la web e imprimir tickets",
   "scripts": {
     "start": "electron main.js",
@@ -15,7 +15,7 @@
     "publish": [
       {
         "provider": "generic",
-        "url": "https://terrones.click/lanzamientos/"
+        "url": "https://tunkitos.terrones.dev/lanzamientos/"
       }
     ],
     "files": [
@@ -52,7 +52,6 @@
     "node-thermal-printer": "^4.4.0",
     "puppeteer": "^21.3.4",
     "sweetalert2": "^11.6.13",
-    "visor-web": "file:",
     "winston": "^3.10.0"
   },
   "main": "main.js"
