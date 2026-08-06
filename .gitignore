@@ -135,3 +135,7 @@ dist
 /TERRONES-win32-x64/
 /MiAplicacion-win32-x64/
 /local-win32-x64/
+/.build-venv/
+/python-print/build/
+/python-print/dist/
+**/__pycache__/

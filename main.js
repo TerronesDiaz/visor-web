@@ -1,38 +1,37 @@
-const { app, BrowserWindow, dialog, ipcMain } = require("electron");
+const { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
-const packageConfig = require("./package.json");
 const winston = require("winston");
 const fs = require("fs");
-const puppeteer = require("puppeteer");
-const axios = require("axios");
 const { spawn } = require("child_process");
+const http = require("http");
 const path = require('path');
-const { start } = require('./apiCajon/index');
-const { log } = require("console");
+const localRuntime = require('./local-runtime');
 
-// Lee las URLs desde appURLs.json
-function loadURLs() {
-  try {
-    const urls = JSON.parse(fs.readFileSync(path.join(__dirname, 'appURLs.json'))).appURLs;
-    return urls;
-  } catch (err) {
-    console.error('Error al cargar URLs:', err);
-    return []; // Devuelve un array vacío si hay un error
-  }
-}
+let printProcess = null;
+let startupWindow = null;
+let bootPromise = null;
+let currentRuntimeStatus = { state: 'starting', phase: 'bootstrap', message: 'Preparando POS local…' };
 
 function runPythonScript(imagePath) {
   const imageToUse = imagePath || path.join(__dirname, 'python-print', 'media', 'img', 'picture.png');
-  executePythonScript(imageToUse);
+  return executePythonScript(imageToUse);
 }
 
 function executePythonScript(imagePath) {
-  // Determina la ruta del script de Python según el entorno
-  const scriptPath = app.isPackaged
-    ? path.join(process.resourcesPath, 'app.asar.unpacked', 'python-print', 'imprimir.py')
-    : path.join(__dirname, 'python-print', 'imprimir.py');
+  if (printProcess && !printProcess.killed) return printProcess;
+  const packagedExecutable = path.join(process.resourcesPath, 'print-service', 'terrones-print-service.exe');
+  const developmentExecutable = path.join(__dirname, 'dist', 'print-service', 'terrones-print-service.exe');
+  const executable = fs.existsSync(packagedExecutable) ? packagedExecutable : developmentExecutable;
+  const scriptPath = path.join(__dirname, 'python-print', 'imprimir.py');
+  const command = fs.existsSync(executable) ? executable : 'python';
+  const args = fs.existsSync(executable) ? [imagePath] : [scriptPath, imagePath];
 
-  const pythonProcess = spawn("python", [scriptPath, imagePath]);
+  if (app.isPackaged && !fs.existsSync(executable)) {
+    throw new Error('El servicio autónomo de impresión no está incluido en la instalación.');
+  }
+
+  const pythonProcess = spawn(command, args, { windowsHide: true });
+  printProcess = pythonProcess;
 
   pythonProcess.stdout.on("data", (data) => {
     console.log(`stdout: ${data}`);
@@ -45,6 +44,7 @@ function executePythonScript(imagePath) {
   });
 
   pythonProcess.on("close", (code) => {
+    printProcess = null;
     console.log(`child process exited with code ${code}`);
     logger.info(`child process exited with code ${code}`);
     if (code !== 0) {
@@ -56,12 +56,39 @@ function executePythonScript(imagePath) {
     console.error(`Error al ejecutar el script de Python: ${error}`);
     logger.error(`Error al ejecutar el script de Python: ${error}`);
   });
+  return pythonProcess;
+}
+
+function printServiceHealth() {
+  return new Promise((resolve, reject) => {
+    const request = http.get('http://127.0.0.1:3001/health', { timeout: 1500 }, (response) => {
+      let body = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk) => { body += chunk; });
+      response.on('end', () => {
+        if (response.statusCode !== 200) return reject(new Error(`Impresión respondió HTTP ${response.statusCode}.`));
+        try { resolve(JSON.parse(body)); } catch { reject(new Error('Impresión devolvió una respuesta inválida.')); }
+      });
+    });
+    request.on('timeout', () => request.destroy(new Error('Tiempo de espera agotado.')));
+    request.on('error', reject);
+  });
+}
+
+async function waitForPrintService(timeoutMs = 20000) {
+  const deadline = Date.now() + timeoutMs;
+  let lastError;
+  while (Date.now() < deadline) {
+    try { return await printServiceHealth(); } catch (error) { lastError = error; }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(`El servicio local de impresión no inició: ${lastError?.message || 'sin respuesta'}`);
 }
 
 function checkAndSelectImage(selectedURL) {
-  const storeName = selectedURL.replace(/^https?:\/\//, '').replace(/\.[a-z]{2,}\/?$/, '');
+  const safeStoreName = storeKey(selectedURL);
   const userDataPath = app.getPath('userData');
-  const defaultImagePath = path.join(userDataPath, 'images', `${storeName}.png`);
+  const defaultImagePath = path.join(userDataPath, 'images', `${safeStoreName}.png`);
 
   return new Promise((resolve) => {
     // Verificar permisos de lectura del archivo antes de acceder a él
@@ -123,120 +150,19 @@ function isValidImage(data) {
 
 
 
-const fsPromises = fs.promises;
-const configPath = './config.json';
-let userDownloadPath = '';
 let abierta = false;
 
-// Load configuration at the start
-function loadConfig() {
-  try {
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-    userDownloadPath = config.downloadPath;
-    console.log(`Config loaded: ${JSON.stringify(config)}`);
-  } catch (err) {
-    console.error('Error loading configuration:', err);
-    if (err.code === 'ENOENT') {
-      userDownloadPath = app.getPath('downloads');
-      saveConfig();
-    }
-  }
-}
-
-function saveConfig() {
-  try {
-    fs.writeFileSync(configPath, JSON.stringify({ downloadPath: userDownloadPath }));
-    console.log(`Config saved: ${JSON.stringify({ downloadPath: userDownloadPath })}`);
-  } catch (err) {
-    console.error('Error saving configuration:', err);
-  }
-}
-
-let isSearchInProgress = false;
-
-async function fetchImage(searchQuery) {
-  if (isSearchInProgress) {
-    return 'Another search is in progress';
-  }
-
-  isSearchInProgress = true;
-
-  try {
-    const timeout = new Promise((_, reject) => {
-      setTimeout(() => reject('Search timed out'), 10000);
-    });
-
-    const search = (async () => {
-      const browser = await puppeteer.launch({ headless: "new" });
-      const page = await browser.newPage();
-      await page.goto(`https://www.google.com/search?q=${searchQuery}&tbm=isch`);
-
-      const imageUrl = await page.evaluate(() => {
-        return document.querySelector(".rg_i")?.src || null;
-      });
-
-      await browser.close();
-
-      if (!imageUrl) {
-        return 'Image URL not found';
-      }
-
-      const response = await axios.get(imageUrl, { responseType: "arraybuffer" });
-      const savePath = `${userDownloadPath}/${searchQuery}.jpg`;
-      await fsPromises.writeFile(savePath, response.data, "binary");
-
-      return `Image saved at ${savePath}`;
-    })();
-
-    const result = await Promise.race([timeout, search]);
-    return result;
-
-  } catch (error) {
-    console.error('Error in fetchImage:', error);
-    return `Error in fetchImage: ${error.message}`;
-  } finally {
-    isSearchInProgress = false;
-  }
-}
-
-ipcMain.on('select-download-path', async (event) => {
-  try {
-    const result = await dialog.showOpenDialog({ properties: ['openDirectory'] });
-
-    if (!result.canceled) {
-      userDownloadPath = result.filePaths[0];
-      saveConfig();
-      event.sender.send("download-path-selected", userDownloadPath);
-      console.log(`Download path set to: ${userDownloadPath}`);
-    }
-  } catch (error) {
-    console.error('Error in select-download-path:', error);
-  }
-});
-
-ipcMain.on('set-download-path', (event, path) => {
-  try {
-    userDownloadPath = path;
-    saveConfig();
-    event.sender.send("download-path-set", userDownloadPath);
-    console.log(`Download path manually set to: ${userDownloadPath}`);
-  } catch (error) {
-    console.error('Error in set-download-path:', error);
-  }
-});
-
 ipcMain.on('perform-search', async (event, searchQuery) => {
-  console.log(`Performing search for: ${searchQuery}`);
   try {
-    const message = await fetchImage(searchQuery);
-    event.sender.send("download-success", message);
+    const sanitizedQuery = String(searchQuery || '').replace(/[^a-zA-Z0-9 áéíóúüñÁÉÍÓÚÜÑ-]/g, '').trim();
+    if (!sanitizedQuery) throw new Error('La búsqueda está vacía.');
+    await shell.openExternal(`https://www.google.com/search?tbm=isch&q=${encodeURIComponent(sanitizedQuery)}`);
+    event.sender.send('download-success', 'La búsqueda se abrió en el navegador.');
   } catch (error) {
-    console.error('Error in perform-search:', error);
-    event.sender.send("download-error", "Error downloading image.");
+    logger.warn(`No fue posible abrir la búsqueda web: ${error.message}`);
+    event.sender.send('download-error', 'La búsqueda web requiere conexión.');
   }
 });
-
-loadConfig();
 
 ipcMain.on('close-window', (event) => {
   const win = BrowserWindow.getFocusedWindow();
@@ -246,7 +172,7 @@ ipcMain.on('close-window', (event) => {
   }, 1000);
 });
 
-const logDirectory = "./logs";
+const logDirectory = path.join(app.getPath('userData'), 'logs');
 if (!fs.existsSync(logDirectory)) {
   fs.mkdirSync(logDirectory);
 }
@@ -273,6 +199,21 @@ if (process.env.NODE_ENV !== "production") {
 
 logger.info("Inicio del script.");
 
+autoUpdater.on('error', (error) => {
+  logger.warn(`Actualización no disponible: ${error.message}`);
+});
+autoUpdater.on('update-downloaded', async (info) => {
+  const result = await dialog.showMessageBox({
+    type: 'info',
+    buttons: ['Reiniciar ahora', 'Después'],
+    defaultId: 0,
+    cancelId: 1,
+    title: 'Actualización lista',
+    message: `Terrones POS ${info.version} está listo para instalar.`,
+  });
+  if (result.response === 0) autoUpdater.quitAndInstall();
+});
+
 function createWindow(url) {
   logger.info("Creando nueva ventana.");
 
@@ -280,7 +221,10 @@ function createWindow(url) {
     width: 800,
     height: 600,
     webPreferences: {
-      nodeIntegration: true,
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      preload: path.join(__dirname, 'preload.js'),
     },
     kiosk: true,
 });
@@ -298,12 +242,12 @@ function createWindow(url) {
     })
     .catch((error) => {
         logger.error(`Error al cargar la URL ${url} o al eliminar caché:`, error);
-        app.quit();
+        showRuntimeError(`No fue posible cargar el POS local: ${error.message}`);
     });
 
   win.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
       logger.error(`Error ${errorCode} cargando ${validatedURL}: ${errorDescription}`);
-      app.quit();
+      showRuntimeError(`El POS local dejó de responder (${errorCode}: ${errorDescription}).`);
   });
 
   win.webContents.on("before-input-event", (event, input) => {
@@ -333,10 +277,10 @@ function createWindow(url) {
                   width: 800,
                   height: 600,
                   webPreferences: {
-                      nodeIntegration: true,
-                      contextIsolation: false,
-                      sandbox: false,
-                      webSecurity: false,
+                      nodeIntegration: false,
+                      contextIsolation: true,
+                      sandbox: true,
+                      preload: path.join(__dirname, 'preload.js'),
                   },
               });
 
@@ -351,190 +295,134 @@ function createWindow(url) {
                 });
           }
       }
+
+      if (input.key === "F9") {
+          createStartupWindow(false);
+          sendRuntimeStatus(currentRuntimeStatus);
+      }
   });
 
   logger.info("Configuración de eventos de la ventana completada.");
 }
 
 
-function createURLSelectorWindow(urls) {
-  const urlSelectorWindow = new BrowserWindow({
-    width: 800,
-    height: 800,
+async function createImageSelectionWindow(selectedURL) {
+  const safeStoreName = storeKey(selectedURL);
+  const result = await dialog.showOpenDialog({
+    title: 'Selecciona el logo para tickets y cortes',
+    properties: ['openFile'],
+    filters: [{ name: 'Imágenes', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'] }],
+  });
+  if (result.canceled || !result.filePaths[0]) return null;
+
+  const imageDirPath = path.join(app.getPath('userData'), 'images');
+  fs.mkdirSync(imageDirPath, { recursive: true });
+  const savedImagePath = path.join(imageDirPath, `${safeStoreName}.png`);
+  const image = nativeImage.createFromPath(result.filePaths[0]);
+  if (image.isEmpty()) throw new Error('La imagen seleccionada no es válida.');
+  const resized = image.resize({ width: 288, height: 288, quality: 'best' });
+  fs.writeFileSync(savedImagePath, resized.toPNG());
+  return savedImagePath;
+}
+
+function storeKey(selectedURL) {
+  try {
+    const parsed = new URL(selectedURL);
+    return `${parsed.hostname}-${parsed.port || 'default'}`.replace(/[^A-Za-z0-9_.-]/g, '_');
+  } catch (_) {
+    return 'terrones-pos-local';
+  }
+}
+
+function sendRuntimeStatus(status) {
+  currentRuntimeStatus = status;
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('runtime:status-changed', status);
+  }
+}
+
+function createStartupWindow(closeWhenReady = true) {
+  if (startupWindow && !startupWindow.isDestroyed()) {
+    startupWindow.show();
+    startupWindow.focus();
+    return startupWindow;
+  }
+  startupWindow = new BrowserWindow({
+    width: 720,
+    height: 560,
+    resizable: true,
+    autoHideMenuBar: true,
     webPreferences: {
-        nodeIntegration: true,
-        contextIsolation: false,
-        webSecurity: false,
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      preload: path.join(__dirname, 'preload.js'),
     },
   });
-
-  urlSelectorWindow.loadFile(path.join(__dirname, 'vistas', 'urlSelector.html'));
-
-  urlSelectorWindow.webContents.on('did-finish-load', () => {
-    urlSelectorWindow.webContents.send('load-urls', urls);
-  });
-
-  return urlSelectorWindow;
+  startupWindow.closeWhenReady = closeWhenReady;
+  startupWindow.loadFile(path.join(__dirname, 'vistas', 'startup.html'));
+  startupWindow.on('closed', () => { startupWindow = null; });
+  return startupWindow;
 }
 
-function createImageSelectionWindow(selectedURL) {
-  const storeName = selectedURL.replace(/^https?:\/\//, '').replace(/\.[a-z]{2,}\/?$/, '');
-  return new Promise((resolve) => {
-    const win = new BrowserWindow({
-      width: 800,
-      height: 600,
-      webPreferences: {
-        nodeIntegration: true,
-        contextIsolation: false,
-      },
-      resizable: false,
-      closable: true,
-    });
-
-    let imageSelected = false;
-
-    win.loadFile(path.join(__dirname, 'vistas', 'image-selection.html'));
-
-    ipcMain.once('image-selected', (event, imagePath) => {
-      imageSelected = true;
-      win.close();
-
-      const userDataPath = app.getPath('userData');
-      const imageDirPath = path.join(userDataPath, 'images');
-      if (!fs.existsSync(imageDirPath)) {
-        fs.mkdirSync(imageDirPath, { recursive: true });
-      }
-      const savedImagePath = path.join(imageDirPath, `${storeName}.png`);
-      const imageBuffer = fs.readFileSync(imagePath);
-      fs.writeFileSync(savedImagePath, imageBuffer);
-
-      resolve(savedImagePath);
-    });
-
-    win.on('closed', () => {
-      if (!imageSelected) {
-        resolve(null);
-      }
-    });
-  });
+function showRuntimeError(message) {
+  sendRuntimeStatus({ state: 'error', phase: 'runtime', message: 'No fue posible iniciar Terrones POS', error: message });
+  createStartupWindow(false);
 }
 
-app.whenReady().then(async () => {
-  start();
-  logger.info("Aplicación lista. Inicializando autoUpdater.");
-  autoUpdater.autoDownload = true;
-  autoUpdater.checkForUpdatesAndNotify();
-
-  autoUpdater.on("checking-for-update", () => {
-    logger.info("Buscando actualizaciones pendientes...");
-  });
-
-  autoUpdater.on("update-available", (info) => {
-    logger.info("Actualización disponible:", info);
-  });
-
-  autoUpdater.on("update-not-available", (info) => {
-    logger.info("No hay ninguna actualización disponible actualmente:", info);
-  });
-
-  autoUpdater.on("update-downloaded", (info) => {
-    logger.info("Actualización descargada:", info);
-    const win = BrowserWindow.getFocusedWindow();
-    if (win) {
-      win.webContents.session.clearCache().then(() => {
-        dialog.showMessageBox({
-          title: "Actualización descargada",
-          message: `Se ha descargado una nueva actualización. La versión actual es ${info.version}. La aplicación se reiniciará para aplicar los cambios.`,
-        }).then(() => {
-          autoUpdater.quitAndInstall();
-        });
-      });
-    }
-  });
-
-  autoUpdater.on("error", (error) => {
-    logger.error("Error durante la actualización:", error);
-  });
-
-  const urls = loadURLs();
-  var selectedURL;
-
-  if (urls && urls.length > 0) {
-    if (urls.length > 1) {
-      const urlSelectorWindow = createURLSelectorWindow();
-  
-      // Enviar las URLs al proceso de renderizado cuando la ventana haya terminado de cargar
-      urlSelectorWindow.webContents.on('did-finish-load', () => {
-        urlSelectorWindow.webContents.send('load-urls', urls);
-      });
-  
-      selectedURL = await new Promise((resolve) => {
-        ipcMain.once('url-selected', (event, url) => {
-          resolve(url);
-          console.log("URL seleccionada:", url);
-          //Cerrar después de 2 segundos
-          setTimeout(() => {
-            urlSelectorWindow.close();
-          }, 500);
-        });
-  
-        urlSelectorWindow.on('closed', () => {
-          if (!selectedURL) {
-            console.log("No se seleccionó ninguna URL. Cerrando aplicación.");
-            resolve(null);
-            app.quit();
-          }
-        });
-      });
-  
-      if (!selectedURL) return;
-  
-    } else {
-      selectedURL = urls[0];
-    }
-  } else {
-    console.log("No hay URLs disponibles. Cerrando aplicación.");
-    app.quit();
-    return;
-  }
-
-  try {
-    const defaultImagePath = await checkAndSelectImage(selectedURL);
-    logger.info("Imagen predeterminada seleccionada:", defaultImagePath);
-    let imagePath;
-    if (!defaultImagePath) {
-      logger.info("No se encontró ninguna imagen predeterminada.");
-      imagePath = await createImageSelectionWindow(selectedURL);
-      logger.info("Imagen seleccionada:", imagePath);
-    } else {
-      imagePath = defaultImagePath;
-      logger.info("Imagen predeterminada seleccionada!:", imagePath);
-    }
-
-    if (imagePath) {
-      logger.info("Imagen seleccionada!:", imagePath);
-      runPythonScript(imagePath);
+async function bootLocalFirst() {
+  if (bootPromise) return bootPromise;
+  createStartupWindow(true);
+  bootPromise = (async () => {
+    try {
+      const result = await localRuntime.ensureLocalRuntime(sendRuntimeStatus);
+      const selectedURL = localRuntime.LOCAL_URL;
+      let imagePath = await checkAndSelectImage(selectedURL);
+      if (!imagePath) imagePath = await createImageSelectionWindow(selectedURL);
+      sendRuntimeStatus({ state: 'starting', phase: 'printing', message: 'Comprobando servicio de impresión…' });
+      runPythonScript(imagePath || path.join(__dirname, 'python-print', 'media', 'img', 'picture.png'));
+      const printHealth = await waitForPrintService();
+      if (!printHealth.printerConfigured) {
+        logger.warn(`No hay impresora predeterminada: ${printHealth.printerError || 'no configurada'}`);
+      }
       createWindow(selectedURL);
-    } else {
-      logger.error("No se seleccionó ninguna imagen!!.");
-      runPythonScript(imagePath);
-      createWindow(selectedURL);
+      sendRuntimeStatus({ ...result, printing: printHealth, sync: localRuntime.readSyncStatus() });
+      if (startupWindow && startupWindow.closeWhenReady) startupWindow.close();
+
+      autoUpdater.autoDownload = true;
+      setTimeout(() => autoUpdater.checkForUpdatesAndNotify().catch((error) => logger.warn(error.message)), 15000);
+    } catch (error) {
+      logger.error(`Error iniciando runtime local: ${error.stack || error.message}`);
+      showRuntimeError(error.message);
+    } finally {
+      bootPromise = null;
     }
-  } catch (error) {
-    logger.error("Error en la selección de imagen:", error);
-    imagePath = await createImageSelectionWindow(selectedURL);
-    logger.info("Imagen seleccionada after error:", imagePath);
-    runPythonScript(imagePath);
-    createWindow(selectedURL);
-  }
+  })();
+  return bootPromise;
+}
+
+ipcMain.handle('runtime:retry', () => bootLocalFirst());
+ipcMain.handle('runtime:status', () => ({ ...currentRuntimeStatus, sync: localRuntime.readSyncStatus() }));
+ipcMain.handle('runtime:diagnostics', () => localRuntime.diagnostics());
+ipcMain.on('runtime:show-status', () => {
+  createStartupWindow(false);
+  sendRuntimeStatus({ ...currentRuntimeStatus, sync: localRuntime.readSyncStatus() });
 });
 
+app.whenReady().then(async () => {
+  app.setLoginItemSettings({ openAtLogin: true, openAsHidden: false });
+  await bootLocalFirst();
+});
 
 app.on("activate", () => {
   logger.info("Aplicación activada.");
   if (BrowserWindow.getAllWindows().length === 0) {
-    createWindow(packageConfig.appURL);
+    bootLocalFirst();
   }
+});
+
+app.on('before-quit', () => {
+  if (printProcess && !printProcess.killed) printProcess.kill();
 });
 
 logger.info("Fin del script.");

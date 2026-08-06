@@ -1,12 +1,13 @@
 {
   "name": "visor-web",
-  "version": "1.5.9",
+  "version": "2.0.0",
   "description": "Programa para abrir el POS en la web e imprimir tickets",
   "scripts": {
     "start": "electron main.js",
     "build": "electron-builder --dir .",
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "instalar": "electron-builder --win"
+    "build:print": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/Build-PrintService.ps1",
+    "test": "node --check main.js && node --check local-runtime.js && node --check preload.js",
+    "instalar": "npm run build:print && electron-builder --win"
   },
   "author": "Francisco Javier Terrones Díaz",
   "license": "ISC",
@@ -20,39 +21,35 @@
     ],
     "files": [
       "main.js",
+      "local-runtime.js",
+      "preload.js",
       "./python-print/**/*",
       "./node_modules/**/*",
-      "./apiCajon/**/*",
       "./vistas/**/*",
       "libusb-1.0.dll",
       "package.json",
       "package-lock.json",
       "appURLs.json"
     ],
+    "extraResources": [
+      {
+        "from": "dist/print-service/terrones-print-service.exe",
+        "to": "print-service/terrones-print-service.exe"
+      }
+    ],
     "asar": true,
     "asarUnpack": [
-      "python-print/**",
       "appURLs.json"
     ]
   },
   "devDependencies": {
-    "@electron/rebuild": "^3.3.0",
-    "electron": "^26.2.1",
-    "electron-builder": "^24.6.4",
-    "electron-rebuild": "^3.2.9",
-    "electron-updater": "^6.1.4"
+    "electron": "^43.3.0",
+    "electron-builder": "^26.15.3"
   },
   "dependencies": {
-    "axios": "^1.14.0",
-    "bootstrap": "^5.3.2",
-    "cors": "^2.8.5",
-    "electron-updater": "^6.1.4",
-    "express": "^4.18.2",
-    "jimp": "^0.3.5",
-    "node-thermal-printer": "^4.4.0",
-    "puppeteer": "^21.3.4",
-    "sweetalert2": "^11.6.13",
-    "winston": "^3.10.0"
+    "bootstrap": "^5.3.8",
+    "electron-updater": "^6.8.9",
+    "winston": "^3.19.0"
   },
   "main": "main.js"
 }
