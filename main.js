@@ -6,6 +6,7 @@ const { spawn } = require("child_process");
 const http = require("http");
 const path = require('path');
 const localRuntime = require('./local-runtime');
+const { resolveStoredLogo, storeKey } = require('./logo-store');
 
 let printProcess = null;
 let startupWindow = null;
@@ -85,67 +86,19 @@ async function waitForPrintService(timeoutMs = 20000) {
   throw new Error(`El servicio local de impresión no inició: ${lastError?.message || 'sin respuesta'}`);
 }
 
-function checkAndSelectImage(selectedURL) {
-  const safeStoreName = storeKey(selectedURL);
-  const userDataPath = app.getPath('userData');
-  const defaultImagePath = path.join(userDataPath, 'images', `${safeStoreName}.png`);
-
-  return new Promise((resolve) => {
-    // Verificar permisos de lectura del archivo antes de acceder a él
-    fs.access(defaultImagePath, fs.constants.R_OK, (accessErr) => {
-      if (accessErr) {
-        if (accessErr.code === 'EPERM' || accessErr.code === 'EACCES') {
-          console.error("Error de permisos al acceder a la imagen:", accessErr);
-          logger.error("Error de permisos al acceder a la imagen:", accessErr);
-        } else {
-          console.error("Error al acceder a la imagen (no existe):", accessErr);
-          logger.error("Error al acceder a la imagen (no existe):", accessErr);
-        }
-        resolve(false);
-      } else {
-        // Si tiene permisos de lectura, verificar si la imagen es válida
-        fs.readFile(defaultImagePath, (readErr, data) => {
-          if (readErr) {
-            console.error("Error al leer la imagen:", readErr);
-            logger.error("Error al leer la imagen:", readErr);
-            resolve(false);
-          } else if (!isValidImage(data)) {
-            logger.error("La imagen está perdida o corrupta.");
-            console.error("La imagen está perdida o corrupta.");
-            resolve(false);
-          } else {
-            logger.info("Imagen encontrada y válida:", defaultImagePath);
-            resolve(defaultImagePath);
-          }
-        });
-      }
-    });
-  });
-}
-
-// Función para verificar si los datos corresponden a una imagen válida
-function isValidImage(data) {
-  if (!data || data.length < 4) {
-    return false; // Archivo demasiado pequeño para ser una imagen válida
-  }
-
-  const signatures = {
-    jpg: [0xff, 0xd8, 0xff],
-    png: [0x89, 0x50, 0x4e, 0x47],
-    gif: [0x47, 0x49, 0x46, 0x38],
-    bmp: [0x42, 0x4d],
-    webp: [0x52, 0x49, 0x46, 0x46],
-  };
-
-  const fileHeader = data.slice(0, 4);
-
-  for (const signature of Object.values(signatures)) {
-    if (signature.every((byte, index) => byte === fileHeader[index])) {
-      return true;
+async function checkAndSelectImage(selectedURL) {
+  try {
+    const result = resolveStoredLogo(app.getPath('userData'), selectedURL);
+    if (result.migratedFrom) {
+      logger.info(`Logo anterior migrado automáticamente desde ${result.migratedFrom} a ${result.path}.`);
+    } else if (result.path) {
+      logger.info(`Logo encontrado y válido: ${result.path}.`);
     }
+    return result.path || false;
+  } catch (error) {
+    logger.error(`No fue posible reutilizar el logo anterior: ${error.message}`);
+    return false;
   }
-
-  return false;
 }
 
 
@@ -323,15 +276,6 @@ async function createImageSelectionWindow(selectedURL) {
   const resized = image.resize({ width: 288, height: 288, quality: 'best' });
   fs.writeFileSync(savedImagePath, resized.toPNG());
   return savedImagePath;
-}
-
-function storeKey(selectedURL) {
-  try {
-    const parsed = new URL(selectedURL);
-    return `${parsed.hostname}-${parsed.port || 'default'}`.replace(/[^A-Za-z0-9_.-]/g, '_');
-  } catch (_) {
-    return 'terrones-pos-local';
-  }
 }
 
 function sendRuntimeStatus(status) {
