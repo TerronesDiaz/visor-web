@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, shell } = require("electron");
 const { autoUpdater } = require("electron-updater");
 const winston = require("winston");
 const fs = require("fs");
@@ -10,7 +10,11 @@ const { resolveStoredLogo, storeKey } = require('./logo-store');
 
 let printProcess = null;
 let startupWindow = null;
+let statusWindow = null;
 let bootPromise = null;
+let importPromise = null;
+let pendingRuntime = null;
+let posWindow = null;
 let currentRuntimeStatus = { state: 'starting', phase: 'bootstrap', message: 'Preparando POS local…' };
 
 function runPythonScript(imagePath) {
@@ -168,20 +172,30 @@ autoUpdater.on('update-downloaded', async (info) => {
 });
 
 function createWindow(url) {
+  if (posWindow && !posWindow.isDestroyed()) {
+    posWindow.show();
+    posWindow.focus();
+    return posWindow;
+  }
   logger.info("Creando nueva ventana.");
 
   const win = new BrowserWindow({
     width: 800,
     height: 600,
+    show: false,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
       preload: path.join(__dirname, 'preload.js'),
     },
-    kiosk: true,
 });
 
+
+  win.once('ready-to-show', () => {
+    win.maximize();
+    win.show();
+  });
 
   logger.info("Ventana de navegador creada con configuración inicial.");
 
@@ -206,8 +220,7 @@ function createWindow(url) {
   win.webContents.on("before-input-event", (event, input) => {
 
       if (input.key === "F12") {
-          logger.info("Tecla F12 presionada. Saliendo del modo kiosco y cerrando la aplicación...");
-          win.setKiosk(false);
+          logger.info("Tecla F12 presionada. Cerrando la aplicación...");
           app.quit();
       }
 
@@ -250,12 +263,15 @@ function createWindow(url) {
       }
 
       if (input.key === "F9") {
-          createStartupWindow(false);
+          createStatusWindow();
           sendRuntimeStatus(currentRuntimeStatus);
       }
   });
 
   logger.info("Configuración de eventos de la ventana completada.");
+  posWindow = win;
+  win.on('closed', () => { posWindow = null; });
+  return win;
 }
 
 
@@ -309,6 +325,30 @@ function createStartupWindow(closeWhenReady = true) {
   return startupWindow;
 }
 
+function createStatusWindow() {
+  if (statusWindow && !statusWindow.isDestroyed()) {
+    statusWindow.show();
+    statusWindow.focus();
+    return statusWindow;
+  }
+  statusWindow = new BrowserWindow({
+    width: 620,
+    height: 600,
+    resizable: true,
+    autoHideMenuBar: true,
+    parent: posWindow && !posWindow.isDestroyed() ? posWindow : undefined,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      preload: path.join(__dirname, 'preload.js'),
+    },
+  });
+  statusWindow.loadFile(path.join(__dirname, 'vistas', 'status.html'));
+  statusWindow.on('closed', () => { statusWindow = null; });
+  return statusWindow;
+}
+
 function showRuntimeError(message) {
   sendRuntimeStatus({ state: 'error', phase: 'runtime', message: 'No fue posible iniciar Terrones POS', error: message });
   createStartupWindow(false);
@@ -320,21 +360,19 @@ async function bootLocalFirst() {
   bootPromise = (async () => {
     try {
       const result = await localRuntime.ensureLocalRuntime(sendRuntimeStatus);
-      const selectedURL = localRuntime.LOCAL_URL;
-      let imagePath = await checkAndSelectImage(selectedURL);
-      if (!imagePath) imagePath = await createImageSelectionWindow(selectedURL);
-      sendRuntimeStatus({ state: 'starting', phase: 'printing', message: 'Comprobando servicio de impresión…' });
-      runPythonScript(imagePath || path.join(__dirname, 'python-print', 'media', 'img', 'picture.png'));
-      const printHealth = await waitForPrintService();
-      if (!printHealth.printerConfigured) {
-        logger.warn(`No hay impresora predeterminada: ${printHealth.printerError || 'no configurada'}`);
+      const provisioning = localRuntime.readProvisioningInfo();
+      if (!provisioning.provisioned) {
+        startupWindow.closeWhenReady = false;
+        sendRuntimeStatus({
+          state: 'needs_provision',
+          phase: 'provision',
+          message: 'Falta copiar la información de la tienda',
+          recipient: provisioning.recipient,
+          sync: localRuntime.readSyncStatus(),
+        });
+        return;
       }
-      createWindow(selectedURL);
-      sendRuntimeStatus({ ...result, printing: printHealth, sync: localRuntime.readSyncStatus() });
-      if (startupWindow && startupWindow.closeWhenReady) startupWindow.close();
-
-      autoUpdater.autoDownload = true;
-      setTimeout(() => autoUpdater.checkForUpdatesAndNotify().catch((error) => logger.warn(error.message)), 15000);
+      await prepareLocalSession(result, false);
     } catch (error) {
       logger.error(`Error iniciando runtime local: ${error.stack || error.message}`);
       showRuntimeError(error.message);
@@ -345,11 +383,85 @@ async function bootLocalFirst() {
   return bootPromise;
 }
 
+async function prepareLocalSession(result, waitForConfirmation) {
+  const selectedURL = localRuntime.LOCAL_URL;
+  let imagePath = await checkAndSelectImage(selectedURL);
+  if (!imagePath) imagePath = await createImageSelectionWindow(selectedURL);
+  sendRuntimeStatus({ state: 'starting', phase: 'printing', message: 'Comprobando logo e impresión…' });
+  runPythonScript(imagePath || path.join(__dirname, 'python-print', 'media', 'img', 'picture.png'));
+  const printHealth = await waitForPrintService();
+  if (!printHealth.printerConfigured) {
+    logger.warn(`No hay impresora predeterminada: ${printHealth.printerError || 'no configurada'}`);
+  }
+  pendingRuntime = { ...result, printing: printHealth, sync: localRuntime.readSyncStatus() };
+  if (waitForConfirmation) {
+    startupWindow.closeWhenReady = false;
+    sendRuntimeStatus({
+      ...pendingRuntime,
+      state: 'ready_to_open',
+      phase: 'ready',
+      message: 'La copia local está lista para validarse',
+    });
+    return;
+  }
+  openPreparedPos();
+}
+
+function openPreparedPos() {
+  if (!localRuntime.readProvisioningInfo().provisioned) {
+    throw new Error('Primero debes restaurar la copia de la tienda.');
+  }
+  createWindow(localRuntime.LOCAL_URL);
+  sendRuntimeStatus(pendingRuntime || {
+    state: 'ready',
+    phase: 'ready',
+    message: 'POS local listo',
+    sync: localRuntime.readSyncStatus(),
+  });
+  if (startupWindow && !startupWindow.isDestroyed()) startupWindow.close();
+  autoUpdater.autoDownload = true;
+  setTimeout(() => autoUpdater.checkForUpdatesAndNotify().catch((error) => logger.warn(error.message)), 15000);
+  return { ok: true };
+}
+
 ipcMain.handle('runtime:retry', () => bootLocalFirst());
+ipcMain.handle('runtime:open-pos', () => openPreparedPos());
 ipcMain.handle('runtime:status', () => ({ ...currentRuntimeStatus, sync: localRuntime.readSyncStatus() }));
 ipcMain.handle('runtime:diagnostics', () => localRuntime.diagnostics());
+ipcMain.handle('provision:get-info', () => localRuntime.readProvisioningInfo());
+ipcMain.handle('provision:copy-recipient', () => {
+  const recipient = localRuntime.readProvisioningInfo().recipient;
+  if (!recipient) throw new Error('No se encontró la clave pública de esta PC.');
+  clipboard.writeText(recipient);
+  return true;
+});
+ipcMain.handle('provision:select-and-import', async () => {
+  if (importPromise) return importPromise;
+  const selection = await dialog.showOpenDialog(startupWindow || undefined, {
+    title: 'Selecciona la copia cifrada de la tienda',
+    properties: ['openFile'],
+    filters: [{ name: 'Copia de Terrones POS', extensions: ['age'] }],
+  });
+  if (selection.canceled || !selection.filePaths[0]) return { canceled: true };
+
+  importPromise = (async () => {
+    try {
+      const restored = await localRuntime.importProvision(selection.filePaths[0], sendRuntimeStatus);
+      logger.info(`Aprovisionamiento restaurado: ${JSON.stringify(restored.manifest || {})}`);
+      await prepareLocalSession({ state: 'ready', phase: 'ready', message: 'POS local listo', url: localRuntime.LOCAL_URL }, true);
+      return { ok: true, manifest: restored.manifest };
+    } catch (error) {
+      logger.error(`Error restaurando la tienda: ${error.stack || error.message}`);
+      showRuntimeError(error.message);
+      return { ok: false, error: error.message };
+    } finally {
+      importPromise = null;
+    }
+  })();
+  return importPromise;
+});
 ipcMain.on('runtime:show-status', () => {
-  createStartupWindow(false);
+  createStatusWindow();
   sendRuntimeStatus({ ...currentRuntimeStatus, sync: localRuntime.readSyncStatus() });
 });
 

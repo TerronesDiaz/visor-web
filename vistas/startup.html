@@ -3,28 +3,67 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Terrones POS</title>
+  <title>Configurar Terrones POS</title>
   <style>
-    :root { color-scheme: light; font-family: "Segoe UI", sans-serif; background:#0f172a; color:#e2e8f0; }
-    body { margin:0; min-height:100vh; display:grid; place-items:center; }
-    main { width:min(620px,88vw); background:#1e293b; border:1px solid #334155; border-radius:20px; padding:34px; box-shadow:0 25px 70px #0007; }
-    h1 { margin:0 0 8px; font-size:30px; } p { color:#94a3b8; }
-    .status { margin:28px 0 18px; padding:18px; border-radius:12px; background:#0f172a; display:flex; gap:14px; align-items:center; }
-    .dot { width:13px; height:13px; border-radius:50%; background:#3b82f6; box-shadow:0 0 0 7px #3b82f622; }
-    .error .dot { background:#ef4444; box-shadow:0 0 0 7px #ef444422; }
-    button { border:0; border-radius:10px; padding:11px 18px; font-weight:700; cursor:pointer; background:#2563eb; color:white; }
-    button[hidden] { display:none; } pre { display:none; max-height:230px; overflow:auto; white-space:pre-wrap; background:#020617; padding:14px; border-radius:10px; color:#cbd5e1; }
-    .actions { display:flex; gap:10px; }
+    :root { color-scheme:light; font-family:"Segoe UI",sans-serif; background:#0f172a; color:#e2e8f0; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:24px; }
+    main { width:min(680px,94vw); background:#1e293b; border:1px solid #334155; border-radius:20px; padding:32px; box-shadow:0 25px 70px #0007; }
+    h1 { margin:0 0 6px; font-size:29px; } h2 { margin:0 0 8px; font-size:19px; }
+    p { color:#a8b4c7; line-height:1.5; } [hidden] { display:none !important; }
+    .steps { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin:24px 0; padding:0; list-style:none; }
+    .step { padding:10px; border-radius:10px; background:#0f172a; color:#64748b; font-size:12px; font-weight:700; text-align:center; border:1px solid #334155; }
+    .step.active { color:#dbeafe; border-color:#3b82f6; background:#1d4ed733; }
+    .step.done { color:#bbf7d0; border-color:#15803d; background:#15803d22; }
+    .status { margin:18px 0; padding:16px; border-radius:12px; background:#0f172a; display:flex; gap:14px; align-items:center; }
+    .dot { flex:0 0 auto; width:13px; height:13px; border-radius:50%; background:#3b82f6; box-shadow:0 0 0 7px #3b82f622; }
+    .status.error .dot { background:#ef4444; box-shadow:0 0 0 7px #ef444422; }
+    .status.ready .dot { background:#22c55e; box-shadow:0 0 0 7px #22c55e22; }
+    .panel { margin-top:16px; padding:18px; background:#0f172a; border:1px solid #334155; border-radius:12px; }
+    code { display:block; padding:10px; margin:10px 0; border-radius:8px; background:#020617; color:#bfdbfe; word-break:break-all; user-select:all; font-size:11px; }
+    button { border:0; border-radius:10px; padding:11px 17px; font-weight:700; cursor:pointer; background:#2563eb; color:white; }
+    button.secondary { background:#475569; } button.success { background:#15803d; }
+    button:disabled { cursor:wait; opacity:.55; }
+    .actions { display:flex; flex-wrap:wrap; gap:10px; margin-top:14px; }
+    .hint { margin:8px 0 0; color:#94a3b8; font-size:12px; }
+    ul { color:#cbd5e1; line-height:1.65; padding-left:22px; }
+    pre { display:none; max-height:210px; overflow:auto; white-space:pre-wrap; background:#020617; padding:14px; border-radius:10px; color:#cbd5e1; }
   </style>
 </head>
 <body>
   <main>
-    <h1>Terrones POS local</h1>
-    <p>Preparando la base de datos, el servidor y la impresión de esta PC.</p>
+    <h1>Preparar esta caja</h1>
+    <p>El asistente comprobará los servicios y copiará la información real de la tienda antes de permitir ventas.</p>
+
+    <ol class="steps">
+      <li class="step active" data-step="1">1. Servicios locales</li>
+      <li class="step" data-step="2">2. Copia de la tienda</li>
+      <li class="step" data-step="3">3. Listo para validar</li>
+    </ol>
+
     <section class="status" id="status"><span class="dot"></span><div><strong id="message">Comprobando instalación…</strong><div id="detail"></div></div></section>
-    <div class="actions">
-      <button id="retry" hidden>Reintentar</button>
-      <button id="diagnostics" hidden>Ver diagnóstico</button>
+
+    <section class="panel" id="provisionPanel" hidden>
+      <h2>Copiar la información de la tienda</h2>
+      <p>Envía esta clave pública al administrador. Recibirás un archivo <strong>.age</strong> que contiene la base de datos y las imágenes cifradas exclusivamente para esta PC.</p>
+      <code id="recipient">Preparando clave pública…</code>
+      <div class="actions">
+        <button class="secondary" id="copyRecipient">Copiar clave</button>
+        <button id="importBundle">Elegir copia de la tienda</button>
+      </div>
+      <p class="hint">No compartas el archivo <em>age-identity.txt</em>. El asistente nunca abre un POS vacío.</p>
+    </section>
+
+    <section class="panel" id="readyPanel" hidden>
+      <h2>Restauración terminada</h2>
+      <p>La copia cifrada fue verificada y restaurada. Al abrir, revisa antes de la primera venta:</p>
+      <ul><li>usuario y acceso</li><li>últimos folios y ventas</li><li>existencias, clientes y saldos</li><li>logo, impresión y apertura de cajón</li></ul>
+      <button class="success" id="openPos">Abrir POS y validar</button>
+    </section>
+
+    <div class="actions" id="errorActions" hidden>
+      <button id="retry">Reintentar</button>
+      <button class="secondary" id="diagnostics">Ver diagnóstico</button>
     </div>
     <pre id="output"></pre>
   </main>

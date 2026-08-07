@@ -5,6 +5,7 @@ const listeners = new Map();
 contextBridge.exposeInMainWorld('terrones', {
   runtime: {
     retry: () => ipcRenderer.invoke('runtime:retry'),
+    openPos: () => ipcRenderer.invoke('runtime:open-pos'),
     getStatus: () => ipcRenderer.invoke('runtime:status'),
     getDiagnostics: () => ipcRenderer.invoke('runtime:diagnostics'),
     onStatus: (callback) => {
@@ -17,6 +18,11 @@ contextBridge.exposeInMainWorld('terrones', {
       if (listener) ipcRenderer.removeListener('runtime:status-changed', listener);
       listeners.delete(callback);
     },
+  },
+  provisioning: {
+    getInfo: () => ipcRenderer.invoke('provision:get-info'),
+    copyRecipient: () => ipcRenderer.invoke('provision:copy-recipient'),
+    selectAndImport: () => ipcRenderer.invoke('provision:select-and-import'),
   },
   window: {
     close: () => ipcRenderer.send('close-window'),
@@ -43,8 +49,8 @@ window.addEventListener('DOMContentLoaded', () => {
   const refresh = async () => {
     const status = await ipcRenderer.invoke('runtime:status');
     const sync = status.sync || status;
-    const labels = { synced: 'Nube: al día', catching_up: 'Nube: actualizando', connecting: 'Nube: conectando', offline: 'Nube: sin conexión', error: 'Nube: error', disabled: 'Nube: no configurada' };
-    const colors = { synced: '#15803d', catching_up: '#d97706', connecting: '#2563eb', offline: '#475569', error: '#b91c1c', disabled: '#64748b' };
+    const labels = { synced: 'Nube: al día', up_to_date: 'Nube: al día', catching_up: 'Nube: actualizando', connecting: 'Nube: conectando', offline: 'Nube: sin conexión', error: 'Nube: error', disabled: 'Nube: no configurada' };
+    const colors = { synced: '#15803d', up_to_date: '#15803d', catching_up: '#d97706', connecting: '#2563eb', offline: '#475569', error: '#b91c1c', disabled: '#64748b' };
     badge.textContent = labels[sync.state] || 'Nube: sin estado';
     badge.style.background = colors[sync.state] || '#64748b';
     badge.title = sync.message || '';

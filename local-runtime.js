@@ -39,6 +39,9 @@ function runtimePaths() {
     env: path.join(root, 'config', '.env.local'),
     state: path.join(root, 'state'),
     syncStatus: path.join(root, 'state', 'sync-status.json'),
+    provisioned: path.join(root, 'state', 'provisioned.json'),
+    provisionRecipient: path.join(root, 'secrets', 'backup-recipient.txt'),
+    provisionImporter: path.join(root, 'app', 'deploy', 'local', 'Import-TerronesProvision.ps1'),
   };
 }
 
@@ -128,6 +131,47 @@ function readSyncStatus() {
   }
 }
 
+function readProvisioningInfo() {
+  const paths = runtimePaths();
+  let manifest = null;
+  let recipient = '';
+  try {
+    const serialized = fs.readFileSync(paths.provisioned, 'utf8').replace(/^\uFEFF/, '');
+    manifest = JSON.parse(serialized);
+  } catch (_) {}
+  try { recipient = fs.readFileSync(paths.provisionRecipient, 'utf8').trim(); } catch (_) {}
+  return { provisioned: Boolean(manifest), recipient, manifest };
+}
+
+async function importProvision(bundlePath, report = () => {}) {
+  const paths = runtimePaths();
+  if (!bundlePath || path.extname(bundlePath).toLowerCase() !== '.age') {
+    throw new Error('Selecciona el paquete cifrado de la tienda con extensión .age.');
+  }
+  if (!fs.existsSync(bundlePath)) throw new Error('El paquete seleccionado ya no existe.');
+  if (!fs.existsSync(paths.provisionImporter)) {
+    throw new Error('La instalación local no contiene el importador de la tienda.');
+  }
+
+  const composeArgs = ['compose', '--env-file', paths.env, '-f', paths.compose];
+  report({ phase: 'provision', state: 'provisioning', message: 'Preparando la restauración segura…' });
+  await execFileAsync('docker.exe', [...composeArgs, 'stop', 'app'], { cwd: paths.app, timeout: 120000 });
+
+  report({ phase: 'provision', state: 'provisioning', message: 'Restaurando base de datos e imágenes…' });
+  const result = await execFileAsync('powershell.exe', [
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', paths.provisionImporter,
+    '-Bundle', bundlePath, '-RuntimeRoot', paths.root,
+  ], { cwd: paths.root, timeout: 1800000, maxBuffer: 10 * 1024 * 1024 });
+
+  if (!readProvisioningInfo().provisioned) {
+    throw new Error('La restauración terminó sin confirmar el aprovisionamiento.');
+  }
+  report({ phase: 'provision', state: 'provisioning', message: 'Iniciando la tienda restaurada…' });
+  await composeUp(paths, report);
+  await waitForApplication(report);
+  return { ...readProvisioningInfo(), output: result.stdout };
+}
+
 async function diagnostics() {
   const paths = runtimePaths();
   let containers = '';
@@ -136,7 +180,7 @@ async function diagnostics() {
   } catch (error) {
     containers = error.stderr || error.message;
   }
-  return { paths, dockerReady: await dockerReady(), appReady: await localHealth(), containers, sync: readSyncStatus() };
+  return { paths, dockerReady: await dockerReady(), appReady: await localHealth(), containers, provisioning: readProvisioningInfo(), sync: readSyncStatus() };
 }
 
 async function ensureLocalRuntime(report = () => {}) {
@@ -153,4 +197,4 @@ async function ensureLocalRuntime(report = () => {}) {
   return result;
 }
 
-module.exports = { LOCAL_URL, diagnostics, ensureLocalRuntime, readSyncStatus, runtimePaths };
+module.exports = { LOCAL_URL, diagnostics, ensureLocalRuntime, importProvision, readProvisioningInfo, readSyncStatus, runtimePaths };

@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Estado de Terrones POS</title>
+  <style>
+    :root { color-scheme:light; font-family:"Segoe UI",sans-serif; background:#0f172a; color:#e2e8f0; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:22px; }
+    main { width:min(570px,95vw); background:#1e293b; border:1px solid #334155; border-radius:20px; padding:28px; box-shadow:0 25px 70px #0007; }
+    h1 { margin:0 0 6px; font-size:27px; }
+    .subtitle { margin:0 0 22px; color:#94a3b8; }
+    .headline { display:flex; align-items:center; gap:12px; padding:16px; border-radius:13px; background:#0f172a; border:1px solid #334155; }
+    .dot { width:14px; height:14px; border-radius:50%; background:#64748b; box-shadow:0 0 0 7px #64748b22; }
+    .headline.synced .dot { background:#22c55e; box-shadow:0 0 0 7px #22c55e22; }
+    .headline.catching_up .dot,.headline.connecting .dot { background:#f59e0b; box-shadow:0 0 0 7px #f59e0b22; }
+    .headline.error .dot,.headline.offline .dot { background:#ef4444; box-shadow:0 0 0 7px #ef444422; }
+    #state { font-size:18px; }
+    #message { color:#94a3b8; font-size:13px; margin-top:3px; }
+    dl { display:grid; grid-template-columns:1fr auto; gap:0; margin:18px 0; background:#0f172a; border:1px solid #334155; border-radius:13px; overflow:hidden; }
+    dt,dd { margin:0; padding:13px 15px; border-bottom:1px solid #253349; }
+    dt { color:#94a3b8; } dd { text-align:right; font-weight:650; }
+    dt:last-of-type,dd:last-of-type { border-bottom:0; }
+    .actions { display:flex; flex-wrap:wrap; gap:10px; }
+    button { border:0; border-radius:10px; padding:11px 16px; font-weight:700; cursor:pointer; background:#2563eb; color:white; }
+    button.secondary { background:#475569; }
+    pre { display:none; max-height:190px; overflow:auto; white-space:pre-wrap; word-break:break-word; background:#020617; padding:13px; border-radius:10px; color:#cbd5e1; font-size:11px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Estado de Terrones POS</h1>
+    <p class="subtitle">La caja local continúa operando aunque se pierda internet.</p>
+    <section class="headline" id="headline">
+      <span class="dot"></span>
+      <div><strong id="state">Comprobando…</strong><div id="message"></div></div>
+    </section>
+    <dl>
+      <dt>POS local</dt><dd id="local">Operativo</dd>
+      <dt>Última actualización</dt><dd id="updated">—</dd>
+      <dt>Atraso de réplica</dt><dd id="lag">—</dd>
+      <dt>Imágenes pendientes</dt><dd id="pending">—</dd>
+      <dt>Último error</dt><dd id="error">Ninguno</dd>
+    </dl>
+    <div class="actions">
+      <button id="refresh">Actualizar</button>
+      <button class="secondary" id="diagnostics">Ver diagnóstico</button>
+      <button class="secondary" id="close">Cerrar</button>
+    </div>
+    <pre id="output"></pre>
+  </main>
+  <script src="status.js"></script>
+</body>
+</html>
