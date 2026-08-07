@@ -26,6 +26,11 @@
     button { border:0; border-radius:10px; padding:11px 16px; font-weight:700; cursor:pointer; background:#2563eb; color:white; }
     button.secondary { background:#475569; }
     pre { display:none; max-height:190px; overflow:auto; white-space:pre-wrap; word-break:break-word; background:#020617; padding:13px; border-radius:10px; color:#cbd5e1; font-size:11px; }
+    .update { margin:18px 0; padding:16px; border:1px solid #334155; border-radius:13px; background:#0f172a; }
+    .update h2 { margin:0 0 8px; font-size:17px; }
+    .update p { margin:5px 0; color:#cbd5e1; }
+    .update small { color:#94a3b8; }
+    #installUpdate[hidden] { display:none; }
   </style>
 </head>
 <body>
@@ -42,9 +47,18 @@
       <dt>Atraso de réplica</dt><dd id="lag">—</dd>
       <dt>Imágenes pendientes</dt><dd id="pending">—</dd>
       <dt>Último error</dt><dd id="error">Ninguno</dd>
+      <dt>Versión en nube</dt><dd id="cloudVersion">—</dd>
     </dl>
+    <section class="update">
+      <h2>Actualizaciones</h2>
+      <p id="updateState">Comprobando…</p>
+      <small id="versions"></small>
+      <progress id="updateProgress" value="0" max="100" hidden style="width:100%;margin-top:10px"></progress>
+      <p id="releaseNotes"></p>
+      <button id="installUpdate" hidden>Instalar actualización</button>
+    </section>
     <div class="actions">
-      <button id="refresh">Actualizar</button>
+      <button id="refresh">Buscar actualización</button>
       <button class="secondary" id="diagnostics">Ver diagnóstico</button>
       <button class="secondary" id="close">Cerrar</button>
     </div>

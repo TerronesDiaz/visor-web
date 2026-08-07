@@ -24,6 +24,10 @@ contextBridge.exposeInMainWorld('terrones', {
     copyRecipient: () => ipcRenderer.invoke('provision:copy-recipient'),
     selectAndImport: () => ipcRenderer.invoke('provision:select-and-import'),
   },
+  updates: {
+    check: () => ipcRenderer.invoke('update:check'),
+    install: () => ipcRenderer.invoke('update:install'),
+  },
   window: {
     close: () => ipcRenderer.send('close-window'),
   },
@@ -51,7 +55,7 @@ window.addEventListener('DOMContentLoaded', () => {
     const sync = status.sync || status;
     const labels = { synced: 'Nube: al día', up_to_date: 'Nube: al día', catching_up: 'Nube: actualizando', connecting: 'Nube: conectando', offline: 'Nube: sin conexión', error: 'Nube: error', disabled: 'Nube: no configurada' };
     const colors = { synced: '#15803d', up_to_date: '#15803d', catching_up: '#d97706', connecting: '#2563eb', offline: '#475569', error: '#b91c1c', disabled: '#64748b' };
-    badge.textContent = labels[sync.state] || 'Nube: sin estado';
+    badge.textContent = (labels[sync.state] || 'Nube: sin estado') + (status.updates?.canInstall ? ' · Actualización lista' : '');
     badge.style.background = colors[sync.state] || '#64748b';
     badge.title = sync.message || '';
   };

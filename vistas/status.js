@@ -5,7 +5,13 @@ const updated = document.getElementById('updated');
 const lag = document.getElementById('lag');
 const pending = document.getElementById('pending');
 const error = document.getElementById('error');
+const cloudVersion = document.getElementById('cloudVersion');
 const output = document.getElementById('output');
+const updateState = document.getElementById('updateState');
+const versions = document.getElementById('versions');
+const releaseNotes = document.getElementById('releaseNotes');
+const installUpdate = document.getElementById('installUpdate');
+const updateProgress = document.getElementById('updateProgress');
 
 const labels = {
   synced: 'Nube al día',
@@ -33,6 +39,26 @@ function render(status) {
   lag.textContent = sync.replicaLagSeconds == null ? 'Sin dato' : `${sync.replicaLagSeconds} s`;
   pending.textContent = String(sync.pendingMedia ?? 0);
   error.textContent = syncState === 'error' ? (sync.message || 'Error sin detalle') : 'Ninguno';
+  cloudVersion.textContent = sync.cloudAppVersion || 'Sin registro';
+  if (status.updates) renderUpdates(status.updates);
+}
+
+function renderUpdates(update) {
+  updateState.textContent = update.message || 'Sin información de actualización.';
+  versions.textContent = `POS instalado: ${update.installed.pos} · Visor instalado: ${update.installed.visor}` +
+    (update.available.pos || update.available.visor ? ` · Disponible: ${update.available.pos || update.available.visor}` : '');
+  releaseNotes.textContent = update.notes || '';
+  installUpdate.hidden = !update.canInstall;
+  installUpdate.disabled = update.state === 'installing';
+  const total = Number(update.progress?.totalBytes || 0);
+  const downloaded = Number(update.progress?.downloadedBytes || 0);
+  updateProgress.hidden = update.state !== 'downloading';
+  if (total > 0) {
+    updateProgress.max = 100;
+    updateProgress.value = Math.min(100, Math.round(downloaded * 100 / total));
+  } else {
+    updateProgress.removeAttribute('value');
+  }
 }
 
 async function refresh() {
@@ -41,6 +67,16 @@ async function refresh() {
 
 window.terrones.runtime.onStatus(render);
 document.getElementById('refresh').addEventListener('click', refresh);
+installUpdate.addEventListener('click', async () => {
+  installUpdate.disabled = true;
+  try {
+    const result = await window.terrones.updates.install();
+    if (result?.canceled) installUpdate.disabled = false;
+  } catch (exception) {
+    updateState.textContent = exception.message;
+    installUpdate.disabled = false;
+  }
+});
 document.getElementById('diagnostics').addEventListener('click', async () => {
   output.style.display = 'block';
   output.textContent = JSON.stringify(await window.terrones.runtime.getDiagnostics(), null, 2);
@@ -50,3 +86,4 @@ refresh().catch((exception) => {
   state.textContent = 'No fue posible leer el estado';
   message.textContent = exception.message;
 });
+setInterval(() => refresh().catch(() => {}), 3000);

@@ -125,6 +125,9 @@ function readSyncStatus() {
       updatedAt: parsed.updatedAt || null,
       pendingMedia: Number(parsed.pendingMedia || 0),
       replicaLagSeconds: parsed.replicaLagSeconds ?? null,
+      localAppVersion: parsed.localAppVersion || null,
+      cloudAppVersion: parsed.cloudAppVersion || null,
+      cloudUpdate: parsed.cloudUpdate || null,
     };
   } catch (_) {
     return { state: 'disabled', message: 'Sincronización aún no configurada', updatedAt: null, pendingMedia: 0, replicaLagSeconds: null };

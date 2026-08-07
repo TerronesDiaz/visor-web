@@ -1,0 +1,63 @@
+name: Publish visor update
+
+on:
+  push:
+    tags: ['visor-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      TERRONES_UPDATE_SIGNING_PRIVATE_XML: ${{ secrets.TERRONES_UPDATE_SIGNING_PRIVATE_XML }}
+      UPDATE_HOST: 148.113.180.61
+      UPDATE_PORT: '57910'
+      UPDATE_USER: ubuntu
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test and build installer
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.Replace('visor-v','')
+          if ($version -ne (Get-Content package.json -Raw | ConvertFrom-Json).version) { throw 'El tag no coincide con package.json.' }
+          if (-not $env:TERRONES_UPDATE_SIGNING_PRIVATE_XML) { throw 'Falta la clave de firma.' }
+          npm ci
+          npm test
+          npm run instalar
+          $setup = Get-ChildItem dist -Filter '*.exe' -File | Where-Object Name -NotMatch 'blockmap' | Select-Object -First 1
+          if (-not $setup) { throw 'No se generó el instalador del visor.' }
+          New-Item -ItemType Directory -Path feed,upload/feed,artifacts -Force | Out-Null
+          node scripts/Sign-TerronesUpdateFeed.js $setup.FullName feed 'Actualizador de un clic para Terrones POS.'
+          Copy-Item feed/* upload/feed/
+          tar.exe -cf artifacts/gateway-release.tar -C upload feed
+          "SETUP=$($setup.FullName)" | Out-File -FilePath $env:GITHUB_ENV -Append
+      - name: Publish private GitHub release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" "$env:SETUP" feed/latest.json feed/latest.json.sig --title "visor-web ${{ github.ref_name }}" --notes 'Visor local-first con actualizaciones verificadas.'
+      - name: Stage release in private gateway
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.UPDATE_RELEASE_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.UPDATE_RELEASE_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_PRIVATE_KEY" && test -n "$SSH_KNOWN_HOSTS"
+          install -d -m 700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/update_release"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/update_release" "$HOME/.ssh/known_hosts"
+          ssh -i "$HOME/.ssh/update_release" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            -p "$UPDATE_PORT" "$UPDATE_USER@$UPDATE_HOST" publish-visor < artifacts/gateway-release.tar

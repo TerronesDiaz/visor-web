@@ -1,11 +1,11 @@
 const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, shell } = require("electron");
-const { autoUpdater } = require("electron-updater");
 const winston = require("winston");
 const fs = require("fs");
 const { spawn } = require("child_process");
 const http = require("http");
 const path = require('path');
 const localRuntime = require('./local-runtime');
+const updateRuntime = require('./update-runtime');
 const { resolveStoredLogo, storeKey } = require('./logo-store');
 
 let printProcess = null;
@@ -155,21 +155,6 @@ if (process.env.NODE_ENV !== "production") {
 }
 
 logger.info("Inicio del script.");
-
-autoUpdater.on('error', (error) => {
-  logger.warn(`Actualización no disponible: ${error.message}`);
-});
-autoUpdater.on('update-downloaded', async (info) => {
-  const result = await dialog.showMessageBox({
-    type: 'info',
-    buttons: ['Reiniciar ahora', 'Después'],
-    defaultId: 0,
-    cancelId: 1,
-    title: 'Actualización lista',
-    message: `Terrones POS ${info.version} está listo para instalar.`,
-  });
-  if (result.response === 0) autoUpdater.quitAndInstall();
-});
 
 function createWindow(url) {
   if (posWindow && !posWindow.isDestroyed()) {
@@ -419,14 +404,12 @@ function openPreparedPos() {
     sync: localRuntime.readSyncStatus(),
   });
   if (startupWindow && !startupWindow.isDestroyed()) startupWindow.close();
-  autoUpdater.autoDownload = true;
-  setTimeout(() => autoUpdater.checkForUpdatesAndNotify().catch((error) => logger.warn(error.message)), 15000);
   return { ok: true };
 }
 
 ipcMain.handle('runtime:retry', () => bootLocalFirst());
 ipcMain.handle('runtime:open-pos', () => openPreparedPos());
-ipcMain.handle('runtime:status', () => ({ ...currentRuntimeStatus, sync: localRuntime.readSyncStatus() }));
+ipcMain.handle('runtime:status', () => ({ ...currentRuntimeStatus, sync: localRuntime.readSyncStatus(), updates: updateRuntime.getStatus(app.getVersion()) }));
 ipcMain.handle('runtime:diagnostics', () => localRuntime.diagnostics());
 ipcMain.handle('provision:get-info', () => localRuntime.readProvisioningInfo());
 ipcMain.handle('provision:copy-recipient', () => {
@@ -463,6 +446,29 @@ ipcMain.handle('provision:select-and-import', async () => {
 ipcMain.on('runtime:show-status', () => {
   createStatusWindow();
   sendRuntimeStatus({ ...currentRuntimeStatus, sync: localRuntime.readSyncStatus() });
+});
+ipcMain.handle('update:check', () => updateRuntime.getStatus(app.getVersion()));
+ipcMain.handle('update:install', async (event) => {
+  const senderUrl = event.senderFrame?.url || '';
+  if (!senderUrl.endsWith('/vistas/status.html')) throw new Error('La actualización solo puede iniciarse desde la ventana de estado.');
+  let modalVisible = false;
+  if (posWindow && !posWindow.isDestroyed()) {
+    modalVisible = await posWindow.webContents.executeJavaScript("Boolean(document.querySelector('.modal.show,[role=dialog][open]'))", true).catch(() => false);
+  }
+  const confirmation = await dialog.showMessageBox(statusWindow || undefined, {
+    type: modalVisible ? 'warning' : 'question',
+    buttons: ['Instalar y cerrar el POS', 'Cancelar'],
+    defaultId: 1,
+    cancelId: 1,
+    title: 'Instalar actualización',
+    message: modalVisible ? 'Hay una ventana de cobro abierta.' : 'La actualización cerrará Terrones POS durante unos minutos.',
+    detail: 'Cancela cualquier cobro o abono en curso y confirma que no hay una venta editándose antes de continuar.',
+  });
+  if (confirmation.response !== 0) return { canceled: true };
+  const result = await updateRuntime.requestInstall({ visorVersion: app.getVersion(), visorExecutable: process.execPath });
+  logger.info('Actualización verificada solicitada; cerrando el visor.');
+  setTimeout(() => app.quit(), 500);
+  return result;
 });
 
 app.whenReady().then(async () => {
