@@ -92,18 +92,24 @@ function compareVersions(left, right) {
   return 0;
 }
 
-function getStatus(visorVersion, root = rootPath()) {
+function getStatus(visorVersion, root = rootPath(), publicKeyFile = path.join(__dirname, 'update-public-key.xml')) {
   const paths = pathsFor(root);
   const installed = readJson(paths.current, {});
   const download = readJson(paths.downloadStatus, { state: 'checking', message: 'Esperando al agente de sincronización.' });
   const install = readJson(paths.installStatus, null);
-  const posFeed = readVerifiedFeed('pos', root);
-  const visorFeed = readVerifiedFeed('visor', root);
+  const posFeed = readVerifiedFeed('pos', root, publicKeyFile);
+  const visorFeed = readVerifiedFeed('visor', root, publicKeyFile);
   const posAvailable = posFeed.ok && compareVersions(posFeed.manifest.version, installed.version) > 0;
   const visorAvailable = visorFeed.ok && compareVersions(visorFeed.manifest.version, visorVersion) > 0;
   const ready = posAvailable || visorAvailable;
-  const state = install?.state === 'installing' ? 'installing' : (ready ? 'ready' : (install?.state || download.state));
-  const message = install?.state === 'installing' ? install.message : (ready ? 'Hay una actualización lista para instalar.' : (install?.message || download.message));
+  const installing = install?.state === 'installing';
+  const failed = install?.state === 'error';
+  const state = installing ? 'installing' : (failed ? 'error' : (ready ? 'ready' : (install?.state || download.state)));
+  const message = installing
+    ? install.message
+    : (failed
+      ? `${install.message || 'La actualización anterior falló.'}${install.error ? ` ${install.error}` : ''}`
+      : (ready ? 'Hay una actualización lista para instalar.' : (install?.message || download.message)));
   return {
     state,
     message,
@@ -114,7 +120,7 @@ function getStatus(visorVersion, root = rootPath()) {
       visor: visorAvailable ? visorFeed.manifest.version : null,
     },
     notes: [posAvailable ? posFeed.manifest.notes : '', visorAvailable ? visorFeed.manifest.notes : ''].filter(Boolean).join('\n\n'),
-    canInstall: ready && install?.state !== 'installing',
+    canInstall: ready && !installing,
     checkedAt: download.updatedAt || null,
     progress: {
       downloadedBytes: Number(download.downloadedBytes || 0),

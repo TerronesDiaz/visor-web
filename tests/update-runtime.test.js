@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { compareVersions, readVerifiedFeed } = require('../update-runtime');
+const { compareVersions, getStatus, readVerifiedFeed } = require('../update-runtime');
 
 test('compara versiones de cuatro segmentos', () => {
   assert.equal(compareVersions('2026.08.07.2', '2026.08.07.1'), 1);
@@ -33,4 +33,34 @@ test('acepta un feed firmado y rechaza alteraciones', () => {
   fs.appendFileSync(path.join(directory, 'latest.json'), ' ');
   assert.equal(readVerifiedFeed('pos', root, keyFile).ok, false);
   fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('mantiene visible un error anterior aunque el paquete siga listo para reintentar', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'terrones-update-error-'));
+  const directory = path.join(root, 'updates', 'downloads', 'pos', 'current');
+  fs.mkdirSync(directory, { recursive: true });
+  const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const jwk = publicKey.export({ format: 'jwk' });
+  const fromUrl = (value) => Buffer.from(value.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('base64');
+  fs.writeFileSync(path.join(root, 'public.xml'), `<RSAKeyValue><Modulus>${fromUrl(jwk.n)}</Modulus><Exponent>${fromUrl(jwk.e)}</Exponent></RSAKeyValue>`);
+  const packageName = 'TerronesPOS-error.zip';
+  const packageBytes = Buffer.from('paquete para reintento');
+  const sha256 = crypto.createHash('sha256').update(packageBytes).digest('hex');
+  const manifest = Buffer.from(JSON.stringify({ schema: 1, channel: 'pos', version: '2026.08.07.2', notes: 'Corrección', package: { name: packageName, size: packageBytes.length, sha256 } }));
+  fs.writeFileSync(path.join(directory, packageName), packageBytes);
+  fs.writeFileSync(path.join(directory, 'latest.json'), manifest);
+  fs.writeFileSync(path.join(directory, 'latest.json.sig'), crypto.sign('RSA-SHA256', manifest, privateKey).toString('base64'));
+  fs.writeFileSync(path.join(directory, '.verified.json'), JSON.stringify({ channel: 'pos', sha256 }));
+  fs.writeFileSync(path.join(root, 'updates', 'current.json'), JSON.stringify({ version: '2026.08.07.1' }));
+  fs.mkdirSync(path.join(root, 'state'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'state', 'update-status.json'), JSON.stringify({ state: 'error', message: 'Falló la instalación.', error: 'Detalle comprobable.' }));
+
+  try {
+    const status = getStatus('2.2.0', root, path.join(root, 'public.xml'));
+    assert.equal(status.state, 'error');
+    assert.equal(status.canInstall, true);
+    assert.match(status.message, /Detalle comprobable/);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

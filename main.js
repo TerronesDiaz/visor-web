@@ -13,6 +13,7 @@ let startupWindow = null;
 let statusWindow = null;
 let bootPromise = null;
 let importPromise = null;
+let updateInstallPending = false;
 let pendingRuntime = null;
 let posWindow = null;
 let currentRuntimeStatus = { state: 'starting', phase: 'bootstrap', message: 'Preparando POS local…' };
@@ -451,24 +452,34 @@ ipcMain.handle('update:check', () => updateRuntime.getStatus(app.getVersion()));
 ipcMain.handle('update:install', async (event) => {
   const senderUrl = event.senderFrame?.url || '';
   if (!senderUrl.endsWith('/vistas/status.html')) throw new Error('La actualización solo puede iniciarse desde la ventana de estado.');
-  let modalVisible = false;
-  if (posWindow && !posWindow.isDestroyed()) {
-    modalVisible = await posWindow.webContents.executeJavaScript("Boolean(document.querySelector('.modal.show,[role=dialog][open]'))", true).catch(() => false);
+  if (updateInstallPending) throw new Error('Ya se está solicitando una actualización.');
+  updateInstallPending = true;
+  try {
+    let modalVisible = false;
+    if (posWindow && !posWindow.isDestroyed()) {
+      modalVisible = await posWindow.webContents.executeJavaScript("Boolean(document.querySelector('.modal.show,[role=dialog][open]'))", true).catch(() => false);
+    }
+    const confirmation = await dialog.showMessageBox(statusWindow || undefined, {
+      type: modalVisible ? 'warning' : 'question',
+      buttons: ['Instalar y cerrar el POS', 'Cancelar'],
+      defaultId: 1,
+      cancelId: 1,
+      title: 'Instalar actualización',
+      message: modalVisible ? 'Hay una ventana de cobro abierta.' : 'La actualización cerrará Terrones POS durante unos minutos.',
+      detail: 'Cancela cualquier cobro o abono en curso y confirma que no hay una venta editándose antes de continuar.',
+    });
+    if (confirmation.response !== 0) {
+      updateInstallPending = false;
+      return { canceled: true };
+    }
+    const result = await updateRuntime.requestInstall({ visorVersion: app.getVersion(), visorExecutable: process.execPath });
+    logger.info('Actualización verificada solicitada; cerrando el visor.');
+    setTimeout(() => app.quit(), 500);
+    return result;
+  } catch (error) {
+    updateInstallPending = false;
+    throw error;
   }
-  const confirmation = await dialog.showMessageBox(statusWindow || undefined, {
-    type: modalVisible ? 'warning' : 'question',
-    buttons: ['Instalar y cerrar el POS', 'Cancelar'],
-    defaultId: 1,
-    cancelId: 1,
-    title: 'Instalar actualización',
-    message: modalVisible ? 'Hay una ventana de cobro abierta.' : 'La actualización cerrará Terrones POS durante unos minutos.',
-    detail: 'Cancela cualquier cobro o abono en curso y confirma que no hay una venta editándose antes de continuar.',
-  });
-  if (confirmation.response !== 0) return { canceled: true };
-  const result = await updateRuntime.requestInstall({ visorVersion: app.getVersion(), visorExecutable: process.execPath });
-  logger.info('Actualización verificada solicitada; cerrando el visor.');
-  setTimeout(() => app.quit(), 500);
-  return result;
 });
 
 app.whenReady().then(async () => {
