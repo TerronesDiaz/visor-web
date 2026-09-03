@@ -40,6 +40,9 @@ jobs:
             Start-Sleep -Seconds 2
           }
           "existing=$($existing.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          # gh conserva exit code 1 cuando el release aún no existe. La ausencia
+          # es el caso esperado para una etiqueta nueva, no un fallo del job.
+          exit 0
       - name: Restore and verify existing release
         if: steps.release.outputs.existing == 'true'
         shell: pwsh
