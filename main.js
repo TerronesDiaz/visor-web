@@ -6,6 +6,8 @@ const http = require("http");
 const path = require('path');
 const localRuntime = require('./local-runtime');
 const updateRuntime = require('./update-runtime');
+const profileStore = require('./profile-store');
+const enrollmentRuntime = require('./enrollment-runtime');
 const { resolveStoredLogo, storeKey } = require('./logo-store');
 
 let printProcess = null;
@@ -14,6 +16,7 @@ let statusWindow = null;
 let bootPromise = null;
 let importPromise = null;
 let updateInstallPending = false;
+let profileOperationPending = false;
 let pendingRuntime = null;
 let posWindow = null;
 let currentRuntimeStatus = { state: 'starting', phase: 'bootstrap', message: 'Preparando POS local…' };
@@ -89,6 +92,17 @@ async function waitForPrintService(timeoutMs = 20000) {
     await new Promise((resolve) => setTimeout(resolve, 500));
   }
   throw new Error(`El servicio local de impresión no inició: ${lastError?.message || 'sin respuesta'}`);
+}
+
+async function stopPrintService() {
+  if (!printProcess || printProcess.killed) return;
+  const processToStop = printProcess;
+  await new Promise((resolve) => {
+    const timeout = setTimeout(resolve, 3000);
+    processToStop.once('close', () => { clearTimeout(timeout); resolve(); });
+    processToStop.kill();
+  });
+  if (printProcess === processToStop) printProcess = null;
 }
 
 async function checkAndSelectImage(selectedURL) {
@@ -346,6 +360,11 @@ async function bootLocalFirst() {
   bootPromise = (async () => {
     try {
       const result = await localRuntime.ensureLocalRuntime(sendRuntimeStatus);
+      if (result.state === 'needs_profile') {
+        startupWindow.closeWhenReady = false;
+        sendRuntimeStatus({ ...result, catalog: profileStore.catalog() });
+        return;
+      }
       const provisioning = localRuntime.readProvisioningInfo();
       if (!provisioning.provisioned) {
         startupWindow.closeWhenReady = false;
@@ -370,7 +389,8 @@ async function bootLocalFirst() {
 }
 
 async function prepareLocalSession(result, waitForConfirmation) {
-  const selectedURL = localRuntime.LOCAL_URL;
+  const activeProfile = profileStore.getProfile(profileStore.getActiveProfileId());
+  const selectedURL = activeProfile.cloudUrl;
   let imagePath = await checkAndSelectImage(selectedURL);
   if (!imagePath) imagePath = await createImageSelectionWindow(selectedURL);
   sendRuntimeStatus({ state: 'starting', phase: 'printing', message: 'Comprobando logo e impresión…' });
@@ -410,8 +430,107 @@ function openPreparedPos() {
 
 ipcMain.handle('runtime:retry', () => bootLocalFirst());
 ipcMain.handle('runtime:open-pos', () => openPreparedPos());
-ipcMain.handle('runtime:status', () => ({ ...currentRuntimeStatus, sync: localRuntime.readSyncStatus(), updates: updateRuntime.getStatus(app.getVersion()) }));
-ipcMain.handle('runtime:diagnostics', () => localRuntime.diagnostics());
+ipcMain.handle('runtime:status', () => {
+  const activeProfileId = profileStore.getActiveProfileId();
+  return {
+    ...currentRuntimeStatus,
+    activeProfileId,
+    sync: activeProfileId ? localRuntime.readSyncStatus(activeProfileId) : { state: 'disabled', message: 'Elige una tienda.' },
+    profiles: localRuntime.listProfileStatus(),
+    updates: updateRuntime.getStatus(app.getVersion()),
+  };
+});
+ipcMain.handle('runtime:diagnostics', () => {
+  const activeProfileId = profileStore.getActiveProfileId();
+  return activeProfileId ? localRuntime.diagnostics(activeProfileId) : { profiles: [], message: 'No hay una tienda instalada.' };
+});
+ipcMain.handle('profiles:list', () => ({
+  activeProfileId: profileStore.getActiveProfileId(),
+  installed: localRuntime.listProfileStatus(),
+  catalog: profileStore.catalog(),
+}));
+ipcMain.handle('profiles:switch', async (_event, profileId) => {
+  if (profileOperationPending) throw new Error('Ya hay una operación de tienda en curso.');
+  profileStore.catalogProfile(profileId);
+  const modalVisible = posWindow && !posWindow.isDestroyed()
+    ? await posWindow.webContents.executeJavaScript("Boolean(document.querySelector('.modal.show,[role=dialog][open],.swal2-container'))", true).catch(() => false)
+    : false;
+  if (modalVisible) throw new Error('Cierra primero la ventana de cobro o el diálogo abierto.');
+  const target = profileStore.getProfile(profileId);
+  const confirmation = await dialog.showMessageBox(statusWindow || posWindow || undefined, {
+    type: 'warning', buttons: ['Respaldar y cambiar', 'Cancelar'], defaultId: 1, cancelId: 1,
+    title: 'Cambiar tienda', message: `Cambiar a ${target.displayName}`,
+    detail: 'Guarda cualquier formulario abierto. Se creará un respaldo antes de cerrar la tienda actual.',
+  });
+  if (confirmation.response !== 0) return { canceled: true };
+  profileOperationPending = true;
+  try {
+    const result = await localRuntime.switchProfile(profileId, sendRuntimeStatus);
+    await stopPrintService();
+    let imagePath = await checkAndSelectImage(result.profile.cloudUrl);
+    if (!imagePath) imagePath = await createImageSelectionWindow(result.profile.cloudUrl);
+    runPythonScript(imagePath || path.join(__dirname, 'python-print', 'media', 'img', 'picture.png'));
+    await waitForPrintService();
+    if (posWindow && !posWindow.isDestroyed()) {
+      await posWindow.loadURL(localRuntime.LOCAL_URL);
+      posWindow.show();
+      posWindow.focus();
+    } else createWindow(localRuntime.LOCAL_URL);
+    sendRuntimeStatus({ state: 'ready', phase: 'ready', message: `${result.profile.displayName} lista`, profile: result.profile, sync: localRuntime.readSyncStatus(profileId), profiles: localRuntime.listProfileStatus() });
+    return result;
+  } catch (error) {
+    if (posWindow && !posWindow.isDestroyed()) await posWindow.loadURL(localRuntime.LOCAL_URL).catch(() => {});
+    else createWindow(localRuntime.LOCAL_URL);
+    throw error;
+  } finally { profileOperationPending = false; }
+});
+ipcMain.handle('profiles:enroll', async (_event, profileId, code) => {
+  if (profileOperationPending) throw new Error('Ya hay una operación de tienda en curso.');
+  profileStore.catalogProfile(profileId);
+  profileOperationPending = true;
+  try {
+    const previousProfileId = profileStore.getActiveProfileId();
+    const result = await enrollmentRuntime.enroll(
+      profileId,
+      code,
+      (bundle, selectedProfileId) => localRuntime.importProvision(bundle, sendRuntimeStatus, selectedProfileId),
+      sendRuntimeStatus,
+    );
+    if (previousProfileId && previousProfileId !== profileId) {
+      await localRuntime.switchProfile(profileId, sendRuntimeStatus);
+    } else {
+      profileStore.setActiveProfile(profileId);
+      await localRuntime.ensureLocalRuntime(sendRuntimeStatus);
+    }
+    if (posWindow && !posWindow.isDestroyed()) await posWindow.loadURL(localRuntime.LOCAL_URL);
+    await stopPrintService();
+    await prepareLocalSession({ state: 'ready', phase: 'ready', message: `${result.profile.displayName} lista`, profile: result.profile, url: localRuntime.LOCAL_URL }, false);
+    return result;
+  } finally { profileOperationPending = false; }
+});
+ipcMain.handle('profiles:finalize', async (_event, profileId) => {
+  if (profileOperationPending) throw new Error('Ya hay una operación de tienda en curso.');
+  const profile = profileStore.getProfile(profileId);
+  const confirmation = await dialog.showMessageBox(statusWindow || posWindow || undefined, {
+    type: 'warning', buttons: ['Finalizar y habilitar ventas', 'Cancelar'], defaultId: 1, cancelId: 1,
+    title: 'Finalizar configuración', message: `Confirmar ${profile.displayName}`,
+    detail: 'Confirma que revisaste usuarios, folios, ventas, saldos, existencias e imágenes. La base del VPS se convertirá en réplica de solo lectura.',
+  });
+  if (confirmation.response !== 0) return { canceled: true };
+  profileOperationPending = true;
+  try {
+    const result = await enrollmentRuntime.finalize(profileId, sendRuntimeStatus);
+    if (profileStore.getActiveProfileId() === profileId) {
+      const paths = localRuntime.runtimePaths(profileId);
+      await localRuntime.stopApplication(paths);
+      await localRuntime.startApplication(paths, sendRuntimeStatus);
+      await localRuntime.waitForApplication(sendRuntimeStatus);
+      if (posWindow && !posWindow.isDestroyed()) await posWindow.loadURL(localRuntime.LOCAL_URL);
+    }
+    sendRuntimeStatus({ state: 'ready', phase: 'ready', message: `${profile.displayName} habilitada para ventas`, profile, sync: localRuntime.readSyncStatus(profileId), profiles: localRuntime.listProfileStatus() });
+    return result;
+  } finally { profileOperationPending = false; }
+});
 ipcMain.handle('provision:get-info', () => localRuntime.readProvisioningInfo());
 ipcMain.handle('provision:copy-recipient', () => {
   const recipient = localRuntime.readProvisioningInfo().recipient;
@@ -483,8 +602,12 @@ ipcMain.handle('update:install', async (event) => {
 });
 
 app.whenReady().then(async () => {
+  profileStore.initializeCatalog(__dirname, { requireSignature: app.isPackaged });
   app.setLoginItemSettings({ openAtLogin: true, openAsHidden: false });
   await bootLocalFirst();
+}).catch((error) => {
+  logger.error(`No fue posible validar el catálogo o iniciar el visor: ${error.stack || error.message}`);
+  showRuntimeError(error.message);
 });
 
 app.on("activate", () => {

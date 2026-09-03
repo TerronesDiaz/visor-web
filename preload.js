@@ -24,6 +24,12 @@ contextBridge.exposeInMainWorld('terrones', {
     copyRecipient: () => ipcRenderer.invoke('provision:copy-recipient'),
     selectAndImport: () => ipcRenderer.invoke('provision:select-and-import'),
   },
+  profiles: {
+    list: () => ipcRenderer.invoke('profiles:list'),
+    switchTo: (profileId) => ipcRenderer.invoke('profiles:switch', profileId),
+    enroll: (profileId, code) => ipcRenderer.invoke('profiles:enroll', profileId, code),
+    finalize: (profileId) => ipcRenderer.invoke('profiles:finalize', profileId),
+  },
   updates: {
     check: () => ipcRenderer.invoke('update:check'),
     install: () => ipcRenderer.invoke('update:install'),

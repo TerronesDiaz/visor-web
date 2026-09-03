@@ -1,13 +1,14 @@
 {
   "name": "visor-web",
-  "version": "2.2.0",
+  "version": "3.0.0",
   "description": "Programa para abrir el POS en la web e imprimir tickets",
   "scripts": {
     "start": "electron main.js",
-    "build": "electron-builder --dir .",
+    "build": "npm run sign:catalog && electron-builder --dir .",
     "build:print": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/Build-PrintService.ps1",
-    "test": "node --check main.js && node --check local-runtime.js && node --check preload.js && node --check vistas/startup.js && node --check vistas/status.js && node --test tests/*.test.js",
-    "instalar": "npm run build:print && electron-builder --win"
+    "sign:catalog": "node scripts/Sign-StoreCatalog.js",
+    "test": "node --check main.js && node --check local-runtime.js && node --check profile-store.js && node --check enrollment-runtime.js && node --check preload.js && node --check vistas/startup.js && node --check vistas/status.js && node --test tests/*.test.js",
+    "instalar": "npm run sign:catalog && npm run build:print && electron-builder --win"
   },
   "author": "Francisco Javier Terrones Díaz",
   "license": "ISC",
@@ -22,6 +23,10 @@
     "files": [
       "main.js",
       "local-runtime.js",
+      "profile-store.js",
+      "enrollment-runtime.js",
+      "store-catalog.json",
+      "store-catalog.json.sig",
       "update-runtime.js",
       "update-public-key.xml",
       "logo-store.js",

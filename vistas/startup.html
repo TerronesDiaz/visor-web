@@ -28,6 +28,7 @@
     .hint { margin:8px 0 0; color:#94a3b8; font-size:12px; }
     ul { color:#cbd5e1; line-height:1.65; padding-left:22px; }
     pre { display:none; max-height:210px; overflow:auto; white-space:pre-wrap; background:#020617; padding:14px; border-radius:10px; color:#cbd5e1; }
+    select,input { width:100%; border:1px solid #475569; border-radius:9px; padding:11px; margin:6px 0; background:#020617; color:#e2e8f0; }
   </style>
 </head>
 <body>
@@ -52,6 +53,15 @@
         <button id="importBundle">Elegir copia de la tienda</button>
       </div>
       <p class="hint">No compartas el archivo <em>age-identity.txt</em>. El asistente nunca abre un POS vacío.</p>
+    </section>
+
+    <section class="panel" id="profilePanel" hidden>
+      <h2>Elegir tienda</h2>
+      <p>Selecciona la tienda e introduce el código de un solo uso generado por el administrador.</p>
+      <select id="profileSelect"></select>
+      <input id="enrollmentCode" autocomplete="one-time-code" placeholder="Código de enrolamiento">
+      <button id="enrollProfile">Configurar tienda</button>
+      <p class="hint" id="profileMessage"></p>
     </section>
 
     <section class="panel" id="readyPanel" hidden>

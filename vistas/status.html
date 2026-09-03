@@ -31,6 +31,14 @@
     .update p { margin:5px 0; color:#cbd5e1; }
     .update small { color:#94a3b8; }
     #installUpdate[hidden] { display:none; }
+    .profiles { margin:18px 0; padding:16px; border:1px solid #334155; border-radius:13px; background:#0f172a; }
+    .profiles h2 { margin:0 0 10px; font-size:17px; }
+    .profile-row { display:grid; grid-template-columns:1fr auto; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid #253349; }
+    .profile-row:last-child { border-bottom:0; }
+    .profile-meta { color:#94a3b8; font-size:12px; }
+    .enroll { display:grid; grid-template-columns:1fr 1fr auto; gap:8px; margin-top:12px; }
+    select,input { width:100%; border:1px solid #475569; border-radius:9px; padding:10px; background:#020617; color:#e2e8f0; }
+    #profileMessage { color:#fbbf24; min-height:18px; }
   </style>
 </head>
 <body>
@@ -49,6 +57,16 @@
       <dt>Último error</dt><dd id="error">Ninguno</dd>
       <dt>Versión en nube</dt><dd id="cloudVersion">—</dd>
     </dl>
+    <section class="profiles">
+      <h2>Tiendas</h2>
+      <div id="profileList">Cargando perfiles…</div>
+      <div class="enroll">
+        <select id="newProfile"></select>
+        <input id="enrollmentCode" autocomplete="one-time-code" placeholder="Código de enrolamiento">
+        <button id="enrollProfile">Agregar</button>
+      </div>
+      <div id="profileMessage"></div>
+    </section>
     <section class="update">
       <h2>Actualizaciones</h2>
       <p id="updateState">Comprobando…</p>
