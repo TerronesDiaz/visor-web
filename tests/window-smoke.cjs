@@ -16,6 +16,11 @@ ipcMain.handle('runtime:status', () => status);
 ipcMain.handle('profiles:list', () => ({ catalog: [], installed: [] }));
 ipcMain.handle('provision:get-info', () => ({}));
 const server = http.createServer((req, res) => {
+  if (req.url === '/no-frames') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end('<html><body><h1>Tienda sin fotogramas</h1><script>window.requestAnimationFrame = () => 1;</script></body></html>');
+    return;
+  }
   const finish = () => { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); res.end('<html><body style="margin:0;background:#f8fafc;font:28px Segoe UI;padding:60px"><h1>Tienda de prueba</h1><p>POS cargado en la misma ventana</p></body></html>'); };
   if (req.url === '/slow') setTimeout(finish, 700); else finish();
 });
@@ -50,6 +55,8 @@ app.whenReady().then(async () => {
   assert.equal(host.isPreparing(), true);
   fs.writeFileSync(path.join(output, 'error.png'), (await host.preparationContents.capturePage()).toPNG());
   assert.equal(await host.loadPos(url), true, JSON.stringify(errors));
+  assert.equal(await host.loadPos(`${url}/no-frames`), true, JSON.stringify(errors));
+  assert.equal(host.isPreparing(), false);
   const closing = host.loadPos(`${url}/slow`);
   host.window.close();
   assert.equal(await closing, false);

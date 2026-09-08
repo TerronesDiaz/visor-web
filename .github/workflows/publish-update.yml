@@ -67,10 +67,15 @@ jobs:
           npm ci
           npm test
           npm run instalar
+          if ($LASTEXITCODE -ne 0) { throw 'Fallo al construir el visor.' }
+          $env:ELECTRON_RUN_AS_NODE = $null
+          $env:TERRONES_SMOKE_MODULE_ROOT = (Resolve-Path 'dist/win-unpacked/resources/app.asar').Path
+          $smoke = Start-Process -FilePath 'node_modules/electron/dist/electron.exe' -ArgumentList 'tests/window-smoke.cjs' -WindowStyle Hidden -Wait -PassThru
+          if ($smoke.ExitCode -ne 0) { Get-Content runtime/window-smoke/result.json; throw 'Fallo de apertura con los modulos empaquetados.' }
           $setup = Get-ChildItem dist -Filter '*.exe' -File | Where-Object Name -NotMatch 'blockmap' | Select-Object -First 1
           if (-not $setup) { throw 'No se generó el instalador del visor.' }
           New-Item -ItemType Directory -Path feed,upload/feed,artifacts -Force | Out-Null
-          node scripts/Sign-TerronesUpdateFeed.js $setup.FullName feed 'Inicio fluido en una sola ventana, Docker en segundo plano y reintentos sin ventanas adicionales.'
+          node scripts/Sign-TerronesUpdateFeed.js $setup.FullName feed 'Corrige la espera de fotogramas al abrir la tienda, conserva errores de carga y cierra el arbol de procesos de impresion.'
           Copy-Item feed/* upload/feed/
           tar.exe -cf artifacts/gateway-release.tar -C upload feed
       - name: Publish private GitHub release
@@ -80,7 +85,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $assets = @(Get-ChildItem feed -File | ForEach-Object FullName)
-          gh release create "${{ github.ref_name }}" @assets --title "visor-web ${{ github.ref_name }}" --notes 'Inicio fluido en una sola ventana con logo. Docker arranca en segundo plano. Reintentos, carga y aperturas duplicadas reutilizan la ventana existente. Las tareas de Windows sin consola requieren instalar también el paquete actualizado del POS.'
+          gh release create "${{ github.ref_name }}" @assets --title "visor-web ${{ github.ref_name }}" --notes 'Corrige el bloqueo de apertura cuando la vista no entrega fotogramas. Conserva el error real y la fase de carga en pantalla y registro. Cierra el arbol de procesos de impresion antes de salir. Validado con pruebas unitarias y Electron sobre los modulos empaquetados. Las tareas de Windows sin consola requieren tambien migrar las tareas del POS.'
       - name: Stage release in private gateway
         shell: bash
         env:

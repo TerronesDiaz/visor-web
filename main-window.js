@@ -14,6 +14,7 @@ function createMainWindow({ BrowserWindow, WebContentsView, onError, onClosed, o
   });
   let closed = false;
   let loading = null;
+  let lastLoadError = null;
   let resolveClosed;
   const closedSignal = new Promise(resolve => { resolveClosed = resolve; });
   const view = new WebContentsView({ webPreferences: { ...preferences, backgroundThrottling: false } });
@@ -59,24 +60,34 @@ function createMainWindow({ BrowserWindow, WebContentsView, onError, onClosed, o
     window: win,
     contents: view.webContents,
     preparationContents: cover.webContents,
+    getLoadError() { return lastLoadError; },
     isPreparing() { return cover.getVisible(); },
     showPreparation() { if (!closed) cover.setVisible(true); },
     async loadPos(url) {
       if (closed) return false;
       if (loading) return loading;
+      lastLoadError = null;
       cover.setVisible(true);
       loading = Promise.resolve().then(async () => {
         let timer;
+        let frameTimer;
+        let phase = 'cargando la página local';
         try {
           const navigation = (async () => {
             await view.webContents.loadURL(url);
             if (closed) return false;
-            // Wait for a rendered frame as well as successful navigation.
-            await view.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+            phase = 'preparando la vista';
+            // A covered/minimized renderer may not deliver animation frames.
+            // Navigation succeeded; a missing frame must not block a usable POS.
+            await Promise.race([
+              view.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))'),
+              new Promise(resolve => { frameTimer = setTimeout(resolve, 250); }),
+              closedSignal,
+            ]);
             return true;
           })();
           const loaded = await Promise.race([navigation, closedSignal, new Promise((_resolve, reject) => {
-            timer = setTimeout(() => reject(new Error('La tienda tardó demasiado en cargar.')), 30000);
+            timer = setTimeout(() => reject(new Error(`La tienda tardó demasiado: ${phase} (${url}).`)), 30000);
           })]);
           if (!loaded || closed) return false;
           resize();
@@ -84,9 +95,10 @@ function createMainWindow({ BrowserWindow, WebContentsView, onError, onClosed, o
           if (win.isFocused()) view.webContents.focus();
           return true;
         } catch (error) {
+          lastLoadError = error;
           if (!closed) { view.webContents.stop(); onError(`No fue posible cargar el POS local: ${error.message}`); }
           return false;
-        } finally { clearTimeout(timer); loading = null; }
+        } finally { clearTimeout(timer); clearTimeout(frameTimer); loading = null; }
       });
       return loading;
     },

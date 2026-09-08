@@ -70,8 +70,10 @@ test('un error conserva la presentación y permite reintentar', async () => {
   assert.equal(await first, false);
   assert.equal(f.view.visible, true);
   assert.equal(f.errors.length, 1);
+  assert.equal(f.host.getLoadError().message, 'network');
   const retry = f.host.loadPos('http://localhost'); await Promise.resolve(); f.finish();
   assert.equal(await retry, true);
+  assert.equal(f.host.getLoadError(), null);
 });
 
 test('cerrar durante la carga destruye el contenido y nunca vuelve a mostrarlo', async () => {
@@ -104,4 +106,14 @@ test('permite reintentar incluso cuando loadURL lanza un error sincrónico', asy
   const retry = f.host.loadPos('http://localhost');
   await Promise.resolve(); f.finish();
   assert.equal(await retry, true);
+});
+
+test('abre una página cargada aunque el renderer no entregue fotogramas', async () => {
+  const f = fixture();
+  f.host.contents.executeJavaScript = () => new Promise(() => {});
+  const pending = f.host.loadPos('http://localhost');
+  await Promise.resolve(); f.finish();
+  assert.equal(await pending, true);
+  assert.equal(f.view.visible, false);
+  assert.deepEqual(f.errors, []);
 });

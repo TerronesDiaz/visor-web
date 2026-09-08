@@ -2,6 +2,7 @@ const { app, BrowserWindow, WebContentsView, clipboard, dialog, ipcMain, nativeI
 const winston = require("winston");
 const fs = require("fs");
 const { spawn } = require("child_process");
+const { stopProcessTree } = require('./stop-process-tree');
 const http = require("http");
 const path = require('path');
 const localRuntime = require('./local-runtime');
@@ -64,7 +65,7 @@ function executePythonScript(imagePath) {
   });
 
   pythonProcess.on("close", (code) => {
-    printProcess = null;
+    if (printProcess === pythonProcess) printProcess = null;
     console.log(`child process exited with code ${code}`);
     logger.info(`child process exited with code ${code}`);
     if (code !== 0) {
@@ -106,13 +107,9 @@ async function waitForPrintService(timeoutMs = 20000) {
 }
 
 async function stopPrintService() {
-  if (!printProcess || printProcess.killed) return;
+  if (!printProcess) return;
   const processToStop = printProcess;
-  await new Promise((resolve) => {
-    const timeout = setTimeout(resolve, 3000);
-    processToStop.once('close', () => { clearTimeout(timeout); resolve(); });
-    processToStop.kill();
-  });
+  await stopProcessTree(processToStop);
   if (printProcess === processToStop) printProcess = null;
 }
 
@@ -253,7 +250,7 @@ async function createWindow(url) {
   const host = ensureMainWindow();
   if (!host) return false;
   const loaded = await host.loadPos(url);
-  if (!loaded && !quitting) throw new Error('No fue posible abrir la tienda. Reintenta desde la pantalla de inicio.');
+  if (!loaded && !quitting) throw host.getLoadError() || new Error('No fue posible abrir la tienda. Reintenta desde la pantalla de inicio.');
   return loaded;
 }
 
@@ -320,6 +317,7 @@ function createStatusWindow() {
 
 function showRuntimeError(message) {
   if (quitting) return;
+  logger.error(`Error visible del visor: ${message}`);
   sendRuntimeStatus({ state: 'error', phase: 'runtime', message: 'No fue posible iniciar Terrones POS', error: message });
   createStartupWindow(false);
 }
@@ -593,9 +591,20 @@ app.on("activate", () => {
   }
 });
 
-app.on('before-quit', () => {
+let printerShutdownPending = false;
+let printerShutdownFinished = false;
+app.on('before-quit', (event) => {
   quitting = true;
-  if (printProcess && !printProcess.killed) printProcess.kill();
+  if (printerShutdownFinished || !printProcess) return;
+  event.preventDefault();
+  if (printerShutdownPending) return;
+  printerShutdownPending = true;
+  stopPrintService().catch((error) => {
+    logger.error(`No fue posible cerrar la impresión: ${error.message}`);
+  }).finally(() => {
+    printerShutdownFinished = true;
+    app.quit();
+  });
 });
 
 logger.info("Fin del script.");
