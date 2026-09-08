@@ -69,8 +69,10 @@ jobs:
           npm run instalar
           if ($LASTEXITCODE -ne 0) { throw 'Fallo al construir el visor.' }
           $env:ELECTRON_RUN_AS_NODE = $null
+          node node_modules/electron/install.js
+          if ($LASTEXITCODE -ne 0) { throw 'No fue posible preparar Electron para la prueba.' }
           $env:TERRONES_SMOKE_MODULE_ROOT = (Resolve-Path 'dist/win-unpacked/resources/app.asar').Path
-          $smoke = Start-Process -FilePath 'node_modules/electron/dist/electron.exe' -ArgumentList 'tests/window-smoke.cjs' -WindowStyle Hidden -Wait -PassThru
+          $smoke = Start-Process -FilePath (Resolve-Path 'node_modules/electron/dist/electron.exe').Path -ArgumentList 'tests/window-smoke.cjs' -WindowStyle Hidden -Wait -PassThru
           if ($smoke.ExitCode -ne 0) { Get-Content runtime/window-smoke/result.json; throw 'Fallo de apertura con los modulos empaquetados.' }
           $setup = Get-ChildItem dist -Filter '*.exe' -File | Where-Object Name -NotMatch 'blockmap' | Select-Object -First 1
           if (-not $setup) { throw 'No se generó el instalador del visor.' }
