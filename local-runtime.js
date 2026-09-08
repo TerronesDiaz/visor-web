@@ -1,8 +1,9 @@
-const { spawn, execFile } = require('child_process');
+const { execFile } = require('child_process');
 const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const profiles = require('./profile-store');
+const { configureDockerBackground } = require('./docker-settings');
 
 const LOCAL_URL = 'http://127.0.0.1:8080';
 const DOCKER_START_TIMEOUT_MS = 180000;
@@ -43,10 +44,14 @@ async function dockerReady() {
 
 async function ensureDocker(report) {
   if (await dockerReady()) return;
-  const desktop = findDockerDesktop();
-  if (!desktop) throw new Error('Docker Desktop no está instalado. Ejecuta de nuevo el instalador de Terrones POS.');
-  report({ phase: 'docker', state: 'starting', message: 'Iniciando Docker Desktop…' });
-  spawn(desktop, [], { detached: true, stdio: 'ignore', windowsHide: true }).unref();
+  if (!findDockerDesktop()) throw new Error('Docker Desktop no está instalado. Ejecuta de nuevo el instalador de Terrones POS.');
+  configureDockerBackground();
+  report({ phase: 'docker', state: 'starting', message: 'Iniciando servicios…' });
+  try {
+    await execFileAsync('docker.exe', ['desktop', 'start', '--detach'], { timeout: 15000 });
+  } catch (error) {
+    throw new Error(`No fue posible iniciar los servicios en segundo plano. Revisa o actualiza Docker Desktop. ${error.stderr || error.message}`);
+  }
   const deadline = Date.now() + DOCKER_START_TIMEOUT_MS;
   while (Date.now() < deadline) { if (await dockerReady()) return; await delay(3000); }
   throw new Error('Docker Desktop no respondió en tres minutos. Revisa WSL2 y vuelve a intentar.');
@@ -132,7 +137,7 @@ async function importProvision(bundlePath, report = () => {}, profileId) {
   await startBackground(paths, report);
   await stopApplication(paths);
   const result = await execFileAsync('powershell.exe', [
-    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', paths.provisionImporter,
+    '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', paths.provisionImporter,
     '-Bundle', bundlePath, '-RuntimeRoot', paths.root, '-InstallRoot', paths.installRoot,
     '-ProfileId', paths.profile.id, '-ComposeProject', paths.profile.composeProject,
   ], { cwd: paths.root, timeout: 1800000, maxBuffer: 10 * 1024 * 1024 });
@@ -147,7 +152,7 @@ async function runBackup(profileId, tier = 'daily') {
   const paths = runtimePaths(profileId);
   if (!fs.existsSync(paths.backupScript)) throw new Error('No se encontró el script de respaldo.');
   return execFileAsync('powershell.exe', [
-    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', paths.backupScript,
+    '-NoProfile', '-NonInteractive', '-WindowStyle', 'Hidden', '-ExecutionPolicy', 'Bypass', '-File', paths.backupScript,
     '-RuntimeRoot', paths.root, '-InstallRoot', paths.installRoot, '-ProfileId', paths.profile.id,
     '-ComposeProject', paths.profile.composeProject, '-Tier', tier,
   ], { cwd: paths.root, timeout: 1800000, maxBuffer: 10 * 1024 * 1024 });

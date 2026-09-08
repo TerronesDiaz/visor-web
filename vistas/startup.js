@@ -31,7 +31,14 @@ async function showProvisioningInfo(status) {
 }
 
 function render(status) {
-  message.textContent = status.message || 'Preparando POS local…';
+  const setup = ['needs_profile', 'needs_provision', 'provisioning', 'ready_to_open', 'enrolling'].includes(status.state);
+  document.getElementById('heading').textContent = setup ? 'Preparar esta caja' : 'Preparando tu punto de venta…';
+  document.getElementById('setupDescription').hidden = !setup;
+  document.getElementById('setupSteps').hidden = !setup;
+  const active = status.profile || status.profiles?.find(profile => profile.active);
+  if (active) document.getElementById('storeName').textContent = active.displayName;
+  const labels = { bootstrap: 'Preparando tu punto de venta…', docker: 'Iniciando servicios…', containers: 'Iniciando servicios…', application: 'Iniciando servicios…', printing: 'Preparando impresión…', opening: 'Abriendo tienda…' };
+  message.textContent = (!setup && status.state !== 'error' && labels[status.phase]) || status.message || 'Preparando tu punto de venta…';
   detail.textContent = status.error || '';
   const failed = status.state === 'error';
   const needsProvision = status.state === 'needs_provision';
@@ -88,7 +95,7 @@ importBundle.addEventListener('click', async () => {
 });
 
 openPos.addEventListener('click', () => window.terrones.runtime.openPos());
-retry.addEventListener('click', async () => { retry.disabled = true; await window.terrones.runtime.retry(); retry.disabled = false; });
+retry.addEventListener('click', async () => { retry.disabled = true; try { await window.terrones.runtime.retry(); } finally { retry.disabled = false; } });
 diagnostics.addEventListener('click', async () => {
   output.style.display = 'block';
   output.textContent = JSON.stringify(await window.terrones.runtime.getDiagnostics(), null, 2);

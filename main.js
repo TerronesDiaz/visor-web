@@ -1,10 +1,21 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, WebContentsView, clipboard, dialog, ipcMain, nativeImage, shell } = require("electron");
 const winston = require("winston");
 const fs = require("fs");
 const { spawn } = require("child_process");
 const http = require("http");
 const path = require('path');
 const localRuntime = require('./local-runtime');
+const { createMainWindow } = require('./main-window');
+const primaryInstance = app.requestSingleInstanceLock();
+if (!primaryInstance) app.quit();
+let mainWindow = null;
+let quitting = false;
+app.on('second-instance', () => {
+  if (!posWindow || posWindow.isDestroyed()) return;
+  if (posWindow.isMinimized()) posWindow.restore();
+  posWindow.show();
+  posWindow.focus();
+});
 const updateRuntime = require('./update-runtime');
 const profileStore = require('./profile-store');
 const enrollmentRuntime = require('./enrollment-runtime');
@@ -171,53 +182,8 @@ if (process.env.NODE_ENV !== "production") {
 
 logger.info("Inicio del script.");
 
-function createWindow(url) {
-  if (posWindow && !posWindow.isDestroyed()) {
-    posWindow.show();
-    posWindow.focus();
-    return posWindow;
-  }
-  logger.info("Creando nueva ventana.");
-
-  const win = new BrowserWindow({
-    width: 800,
-    height: 600,
-    show: false,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      preload: path.join(__dirname, 'preload.js'),
-    },
-});
-
-
-  win.once('ready-to-show', () => {
-    win.maximize();
-    win.show();
-  });
-
-  logger.info("Ventana de navegador creada con configuración inicial.");
-
-  win.loadURL(url)
-    .then(() => {
-        logger.info(`URL cargada exitosamente: ${url}`);
-        return win.webContents.session.clearCache();
-    })
-    .then(() => {
-        logger.info("Caché eliminado exitosamente.");
-    })
-    .catch((error) => {
-        logger.error(`Error al cargar la URL ${url} o al eliminar caché:`, error);
-        showRuntimeError(`No fue posible cargar el POS local: ${error.message}`);
-    });
-
-  win.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
-      logger.error(`Error ${errorCode} cargando ${validatedURL}: ${errorDescription}`);
-      showRuntimeError(`El POS local dejó de responder (${errorCode}: ${errorDescription}).`);
-  });
-
-  win.webContents.on("before-input-event", (event, input) => {
+function attachPosShortcuts(contents) {
+  contents.on("before-input-event", (event, input) => {
 
       if (input.key === "F12") {
           logger.info("Tecla F12 presionada. Cerrando la aplicación...");
@@ -226,7 +192,7 @@ function createWindow(url) {
 
       if (input.key === "F8") {
           logger.info("Tecla F8 presionada. Abriendo DevTools...");
-          win.webContents.openDevTools();
+          contents.openDevTools();
           logger.info("DevTools abierto.");
       }
 
@@ -268,16 +234,32 @@ function createWindow(url) {
       }
   });
 
-  logger.info("Configuración de eventos de la ventana completada.");
-  posWindow = win;
-  win.on('closed', () => { posWindow = null; });
-  return win;
 }
 
+function ensureMainWindow() {
+  if (quitting) return null;
+  if (mainWindow && !mainWindow.window.isDestroyed()) return mainWindow;
+  mainWindow = createMainWindow({
+    BrowserWindow, WebContentsView, onError: showRuntimeError,
+    onClosed: () => { mainWindow = null; posWindow = null; startupWindow = null; app.quit(); },
+    onPosCreated: attachPosShortcuts,
+  });
+  posWindow = mainWindow.window;
+  startupWindow = posWindow;
+  return mainWindow;
+}
+
+async function createWindow(url) {
+  const host = ensureMainWindow();
+  if (!host) return false;
+  const loaded = await host.loadPos(url);
+  if (!loaded && !quitting) throw new Error('No fue posible abrir la tienda. Reintenta desde la pantalla de inicio.');
+  return loaded;
+}
 
 async function createImageSelectionWindow(selectedURL) {
   const safeStoreName = storeKey(selectedURL);
-  const result = await dialog.showOpenDialog({
+  const result = await dialog.showOpenDialog(posWindow || undefined, {
     title: 'Selecciona el logo para tickets y cortes',
     properties: ['openFile'],
     filters: [{ name: 'Imágenes', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'] }],
@@ -295,33 +277,20 @@ async function createImageSelectionWindow(selectedURL) {
 }
 
 function sendRuntimeStatus(status) {
+  if (quitting) return;
   currentRuntimeStatus = status;
+  if (mainWindow && !mainWindow.contents.isDestroyed()) mainWindow.contents.send('runtime:status-changed', status);
+  if (mainWindow && !mainWindow.preparationContents.isDestroyed()) mainWindow.preparationContents.send('runtime:status-changed', status);
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('runtime:status-changed', status);
   }
 }
 
 function createStartupWindow(closeWhenReady = true) {
-  if (startupWindow && !startupWindow.isDestroyed()) {
-    startupWindow.show();
-    startupWindow.focus();
-    return startupWindow;
-  }
-  startupWindow = new BrowserWindow({
-    width: 720,
-    height: 560,
-    resizable: true,
-    autoHideMenuBar: true,
-    webPreferences: {
-      nodeIntegration: false,
-      contextIsolation: true,
-      sandbox: true,
-      preload: path.join(__dirname, 'preload.js'),
-    },
-  });
+  const host = ensureMainWindow();
+  if (!host) return null;
+  host.showPreparation();
   startupWindow.closeWhenReady = closeWhenReady;
-  startupWindow.loadFile(path.join(__dirname, 'vistas', 'startup.html'));
-  startupWindow.on('closed', () => { startupWindow = null; });
   return startupWindow;
 }
 
@@ -350,16 +319,20 @@ function createStatusWindow() {
 }
 
 function showRuntimeError(message) {
+  if (quitting) return;
   sendRuntimeStatus({ state: 'error', phase: 'runtime', message: 'No fue posible iniciar Terrones POS', error: message });
   createStartupWindow(false);
 }
 
 async function bootLocalFirst() {
   if (bootPromise) return bootPromise;
+  if (quitting) return;
   createStartupWindow(true);
+  sendRuntimeStatus({ state: 'starting', phase: 'bootstrap', message: 'Preparando tu punto de venta…' });
   bootPromise = (async () => {
     try {
       const result = await localRuntime.ensureLocalRuntime(sendRuntimeStatus);
+      if (quitting) return;
       if (result.state === 'needs_profile') {
         startupWindow.closeWhenReady = false;
         sendRuntimeStatus({ ...result, catalog: profileStore.catalog() });
@@ -389,13 +362,16 @@ async function bootLocalFirst() {
 }
 
 async function prepareLocalSession(result, waitForConfirmation) {
+  if (quitting) return;
   const activeProfile = profileStore.getProfile(profileStore.getActiveProfileId());
   const selectedURL = activeProfile.cloudUrl;
   let imagePath = await checkAndSelectImage(selectedURL);
   if (!imagePath) imagePath = await createImageSelectionWindow(selectedURL);
-  sendRuntimeStatus({ state: 'starting', phase: 'printing', message: 'Comprobando logo e impresión…' });
+  if (quitting) return;
+  sendRuntimeStatus({ state: 'starting', phase: 'printing', message: 'Preparando impresión…' });
   runPythonScript(imagePath || path.join(__dirname, 'python-print', 'media', 'img', 'picture.png'));
   const printHealth = await waitForPrintService();
+  if (quitting) return;
   if (!printHealth.printerConfigured) {
     logger.warn(`No hay impresora predeterminada: ${printHealth.printerError || 'no configurada'}`);
   }
@@ -410,21 +386,22 @@ async function prepareLocalSession(result, waitForConfirmation) {
     });
     return;
   }
-  openPreparedPos();
+  await openPreparedPos();
 }
 
-function openPreparedPos() {
+async function openPreparedPos() {
+  if (quitting) return { ok: false };
   if (!localRuntime.readProvisioningInfo().provisioned) {
     throw new Error('Primero debes restaurar la copia de la tienda.');
   }
-  createWindow(localRuntime.LOCAL_URL);
+  sendRuntimeStatus({ state: 'starting', phase: 'opening', message: 'Abriendo tienda…' });
+  if (!await createWindow(localRuntime.LOCAL_URL)) return { ok: false };
   sendRuntimeStatus(pendingRuntime || {
     state: 'ready',
     phase: 'ready',
     message: 'POS local listo',
     sync: localRuntime.readSyncStatus(),
   });
-  if (startupWindow && !startupWindow.isDestroyed()) startupWindow.close();
   return { ok: true };
 }
 
@@ -453,7 +430,7 @@ ipcMain.handle('profiles:switch', async (_event, profileId) => {
   if (profileOperationPending) throw new Error('Ya hay una operación de tienda en curso.');
   profileStore.catalogProfile(profileId);
   const modalVisible = posWindow && !posWindow.isDestroyed()
-    ? await posWindow.webContents.executeJavaScript("Boolean(document.querySelector('.modal.show,[role=dialog][open],.swal2-container'))", true).catch(() => false)
+    ? await mainWindow.contents.executeJavaScript("Boolean(document.querySelector('.modal.show,[role=dialog][open],.swal2-container'))", true).catch(() => false)
     : false;
   if (modalVisible) throw new Error('Cierra primero la ventana de cobro o el diálogo abierto.');
   const target = profileStore.getProfile(profileId);
@@ -472,15 +449,15 @@ ipcMain.handle('profiles:switch', async (_event, profileId) => {
     runPythonScript(imagePath || path.join(__dirname, 'python-print', 'media', 'img', 'picture.png'));
     await waitForPrintService();
     if (posWindow && !posWindow.isDestroyed()) {
-      await posWindow.loadURL(localRuntime.LOCAL_URL);
+      await createWindow(localRuntime.LOCAL_URL);
       posWindow.show();
       posWindow.focus();
-    } else createWindow(localRuntime.LOCAL_URL);
+    } else await createWindow(localRuntime.LOCAL_URL);
     sendRuntimeStatus({ state: 'ready', phase: 'ready', message: `${result.profile.displayName} lista`, profile: result.profile, sync: localRuntime.readSyncStatus(profileId), profiles: localRuntime.listProfileStatus() });
     return result;
   } catch (error) {
-    if (posWindow && !posWindow.isDestroyed()) await posWindow.loadURL(localRuntime.LOCAL_URL).catch(() => {});
-    else createWindow(localRuntime.LOCAL_URL);
+    if (posWindow && !posWindow.isDestroyed()) await createWindow(localRuntime.LOCAL_URL).catch(() => {});
+    else await createWindow(localRuntime.LOCAL_URL);
     throw error;
   } finally { profileOperationPending = false; }
 });
@@ -502,7 +479,6 @@ ipcMain.handle('profiles:enroll', async (_event, profileId, code) => {
       profileStore.setActiveProfile(profileId);
       await localRuntime.ensureLocalRuntime(sendRuntimeStatus);
     }
-    if (posWindow && !posWindow.isDestroyed()) await posWindow.loadURL(localRuntime.LOCAL_URL);
     await stopPrintService();
     await prepareLocalSession({ state: 'ready', phase: 'ready', message: `${result.profile.displayName} lista`, profile: result.profile, url: localRuntime.LOCAL_URL }, false);
     return result;
@@ -525,7 +501,7 @@ ipcMain.handle('profiles:finalize', async (_event, profileId) => {
       await localRuntime.stopApplication(paths);
       await localRuntime.startApplication(paths, sendRuntimeStatus);
       await localRuntime.waitForApplication(sendRuntimeStatus);
-      if (posWindow && !posWindow.isDestroyed()) await posWindow.loadURL(localRuntime.LOCAL_URL);
+      if (posWindow && !posWindow.isDestroyed()) await createWindow(localRuntime.LOCAL_URL);
     }
     sendRuntimeStatus({ state: 'ready', phase: 'ready', message: `${profile.displayName} habilitada para ventas`, profile, sync: localRuntime.readSyncStatus(profileId), profiles: localRuntime.listProfileStatus() });
     return result;
@@ -576,7 +552,7 @@ ipcMain.handle('update:install', async (event) => {
   try {
     let modalVisible = false;
     if (posWindow && !posWindow.isDestroyed()) {
-      modalVisible = await posWindow.webContents.executeJavaScript("Boolean(document.querySelector('.modal.show,[role=dialog][open]'))", true).catch(() => false);
+      modalVisible = await mainWindow.contents.executeJavaScript("Boolean(document.querySelector('.modal.show,[role=dialog][open]'))", true).catch(() => false);
     }
     const confirmation = await dialog.showMessageBox(statusWindow || undefined, {
       type: modalVisible ? 'warning' : 'question',
@@ -601,7 +577,7 @@ ipcMain.handle('update:install', async (event) => {
   }
 });
 
-app.whenReady().then(async () => {
+if (primaryInstance) app.whenReady().then(async () => {
   profileStore.initializeCatalog(__dirname, { requireSignature: app.isPackaged });
   app.setLoginItemSettings({ openAtLogin: true, openAsHidden: false });
   await bootLocalFirst();
@@ -618,6 +594,7 @@ app.on("activate", () => {
 });
 
 app.on('before-quit', () => {
+  quitting = true;
   if (printProcess && !printProcess.killed) printProcess.kill();
 });
 

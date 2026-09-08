@@ -70,7 +70,7 @@ jobs:
           $setup = Get-ChildItem dist -Filter '*.exe' -File | Where-Object Name -NotMatch 'blockmap' | Select-Object -First 1
           if (-not $setup) { throw 'No se generó el instalador del visor.' }
           New-Item -ItemType Directory -Path feed,upload/feed,artifacts -Force | Out-Null
-          node scripts/Sign-TerronesUpdateFeed.js $setup.FullName feed 'Actualizador de un clic para Terrones POS.'
+          node scripts/Sign-TerronesUpdateFeed.js $setup.FullName feed 'Inicio fluido en una sola ventana, Docker en segundo plano y reintentos sin ventanas adicionales.'
           Copy-Item feed/* upload/feed/
           tar.exe -cf artifacts/gateway-release.tar -C upload feed
       - name: Publish private GitHub release
@@ -80,7 +80,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $assets = @(Get-ChildItem feed -File | ForEach-Object FullName)
-          gh release create "${{ github.ref_name }}" @assets --title "visor-web ${{ github.ref_name }}" --notes 'Visor local-first con actualizaciones verificadas.'
+          gh release create "${{ github.ref_name }}" @assets --title "visor-web ${{ github.ref_name }}" --notes 'Inicio fluido en una sola ventana con logo. Docker arranca en segundo plano. Reintentos, carga y aperturas duplicadas reutilizan la ventana existente. Las tareas de Windows sin consola requieren instalar también el paquete actualizado del POS.'
       - name: Stage release in private gateway
         shell: bash
         env:
