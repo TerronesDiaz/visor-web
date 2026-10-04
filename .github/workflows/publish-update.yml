@@ -65,7 +65,9 @@ jobs:
           if ($version -ne (Get-Content package.json -Raw | ConvertFrom-Json).version) { throw 'El tag no coincide con package.json.' }
           if (-not $env:TERRONES_UPDATE_SIGNING_PRIVATE_XML) { throw 'Falta la clave de firma.' }
           npm ci
+          if ($LASTEXITCODE -ne 0) { throw 'Fallo al instalar dependencias.' }
           npm test
+          if ($LASTEXITCODE -ne 0) { throw 'Las pruebas del visor fallaron.' }
           npm run instalar
           if ($LASTEXITCODE -ne 0) { throw 'Fallo al construir el visor.' }
           $env:ELECTRON_RUN_AS_NODE = $null
