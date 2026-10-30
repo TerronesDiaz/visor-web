@@ -17,6 +17,13 @@ function execFileAsync(file, args, options = {}) {
   });
 }
 
+const UPDATER_TASK = 'Terrones POS - Actualizar';
+// Written by Install-TerronesRelease.ps1 and Invoke-TerronesUpdate.ps1 (terrones_pos).
+const INSTALL_PHASES = ['prepare', 'backup', 'install', 'migrate', 'start', 'verify', 'visor', 'done', 'failed'];
+const HISTORY_LIMIT = 20;
+// An updater that dies without writing its result must not leave the box "installing" forever.
+const STALE_INSTALL_MS = 15 * 60 * 1000;
+
 function rootPath() {
   return process.env.TERRONES_POS_HOME || path.join(process.env.ProgramData || 'C:\\ProgramData', 'TerronesPOS');
 }
@@ -29,6 +36,9 @@ function pathsFor(root = rootPath()) {
     request: path.join(root, 'updates', 'request.json'),
     downloadStatus: path.join(root, 'state', 'update-download.json'),
     installStatus: path.join(root, 'state', 'update-status.json'),
+    installProgress: path.join(root, 'state', 'update-progress.json'),
+    history: path.join(root, 'state', 'update-history.json'),
+    lock: path.join(root, 'updates', 'install.lock'),
     publicKey: path.join(__dirname, 'update-public-key.xml'),
   };
 }
@@ -92,11 +102,61 @@ function compareVersions(left, right) {
   return 0;
 }
 
+function readInstallProgress(paths) {
+  const progress = readJson(paths.installProgress, null);
+  if (!progress || !INSTALL_PHASES.includes(progress.phase)) return null;
+  return {
+    phase: progress.phase,
+    message: progress.message || '',
+    error: progress.error || '',
+    version: progress.version || '',
+    log: progress.log || '',
+    updatedAt: progress.updatedAt || null,
+  };
+}
+
+function readHistory(paths) {
+  const history = readJson(paths.history, null);
+  return Array.isArray(history?.attempts) ? history.attempts : [];
+}
+
+function recordHistory(paths, install, progress) {
+  const history = readHistory(paths);
+  if (!install?.updatedAt || !['completed', 'error'].includes(install.state)) return history;
+  if (history.some((entry) => entry.at === install.updatedAt)) return history;
+  const attempts = [{
+    at: install.updatedAt,
+    state: install.state,
+    version: install.version || progress?.version || '',
+    message: install.message || '',
+    error: install.error || '',
+    log: progress?.log || '',
+  }, ...history].slice(0, HISTORY_LIMIT);
+  try { writeJsonAtomic(paths.history, { schema: 1, attempts }); } catch (_) { return history; }
+  return attempts;
+}
+
+function isStale(install, paths, now = Date.now()) {
+  if (install?.state !== 'installing' || fs.existsSync(paths.lock)) return false;
+  const updatedAt = Date.parse(install.updatedAt || '');
+  return Number.isFinite(updatedAt) && now - updatedAt > STALE_INSTALL_MS;
+}
+
 function getStatus(visorVersion, root = rootPath(), publicKeyFile = path.join(__dirname, 'update-public-key.xml')) {
   const paths = pathsFor(root);
   const installed = readJson(paths.current, {});
   const download = readJson(paths.downloadStatus, { state: 'checking', message: 'Esperando al agente de sincronización.' });
-  const install = readJson(paths.installStatus, null);
+  let install = readJson(paths.installStatus, null);
+  if (isStale(install, paths)) {
+    install = {
+      ...install,
+      state: 'error',
+      message: 'La actualización anterior se interrumpió antes de terminar.',
+      error: 'El actualizador dejó de reportar avance. Puedes volver a intentarlo.',
+    };
+  }
+  const installProgress = readInstallProgress(paths);
+  const history = recordHistory(paths, install, installProgress);
   const posFeed = readVerifiedFeed('pos', root, publicKeyFile);
   const visorFeed = readVerifiedFeed('visor', root, publicKeyFile);
   const posAvailable = posFeed.ok && compareVersions(posFeed.manifest.version, installed.version) > 0;
@@ -126,7 +186,49 @@ function getStatus(visorVersion, root = rootPath(), publicKeyFile = path.join(__
       downloadedBytes: Number(download.downloadedBytes || 0),
       totalBytes: Number(download.totalBytes || 0),
     },
+    install: installing ? installProgress : null,
+    lastAttempt: history[0] || null,
+    packageBytes: (posAvailable ? Number(posFeed.manifest.package.size || 0) : 0)
+      + (visorAvailable ? Number(visorFeed.manifest.package.size || 0) : 0),
   };
+}
+
+function freeBytes(root) {
+  try {
+    const stats = fs.statfsSync(fs.existsSync(root) ? root : path.parse(root).root);
+    return stats.bavail * stats.bsize;
+  } catch (_) {
+    return null;
+  }
+}
+
+function formatGigabytes(bytes) {
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
+// Everything that would make the updater fail after the POS is closed is checked here first.
+async function preflight({ visorVersion, root = rootPath(), checkDatabase, publicKeyFile, free = freeBytes(root) } = {}) {
+  const paths = pathsFor(root);
+  const status = getStatus(visorVersion, root, publicKeyFile);
+  const problems = [];
+  if (!status.canInstall) problems.push('No hay una actualización verificada lista para instalar.');
+  if (fs.existsSync(paths.request) || fs.existsSync(paths.lock)) {
+    problems.push('Ya hay una actualización en curso; espera a que termine.');
+  }
+  try {
+    await execFileAsync('schtasks.exe', ['/Query', '/TN', UPDATER_TASK]);
+  } catch (_) {
+    problems.push('El actualizador no está registrado en Windows. Ejecuta una vez Install-TerronesUpdate.ps1 como administrador.');
+  }
+  // The package is expanded, loaded into Docker and backed up while the old version is kept.
+  const required = status.packageBytes * 3 + 1024 ** 3;
+  if (status.packageBytes && free !== null && free < required) {
+    problems.push(`Espacio insuficiente en disco: hay ${formatGigabytes(free)} libres y se necesitan ${formatGigabytes(required)}.`);
+  }
+  if (status.available.pos && checkDatabase) {
+    try { await checkDatabase(); } catch (error) { problems.push(error.message); }
+  }
+  return { ok: problems.length === 0, problems, status };
 }
 
 function writeJsonAtomic(file, value) {
@@ -136,16 +238,11 @@ function writeJsonAtomic(file, value) {
   fs.renameSync(temporary, file);
 }
 
-async function requestInstall({ visorVersion, visorExecutable, root = rootPath() }) {
-  const status = getStatus(visorVersion, root);
-  if (!status.canInstall) throw new Error('No hay una actualización verificada lista para instalar.');
+async function requestInstall({ visorVersion, visorExecutable, root = rootPath(), checkDatabase }) {
+  const check = await preflight({ visorVersion, root, checkDatabase });
+  if (!check.ok) throw new Error(check.problems.join(' '));
+  const { status } = check;
   const paths = pathsFor(root);
-  if (fs.existsSync(paths.request)) throw new Error('Ya hay una actualización solicitada.');
-  try {
-    await execFileAsync('schtasks.exe', ['/Query', '/TN', 'Terrones POS - Actualizar']);
-  } catch (_) {
-    throw new Error('El trabajador de actualización aún no está registrado. Instala primero Terrones POS 2026.08.07.2.');
-  }
   writeJsonAtomic(paths.request, {
     schema: 1,
     posVersion: status.available.pos,
@@ -155,7 +252,7 @@ async function requestInstall({ visorVersion, visorExecutable, root = rootPath()
   });
   let triggered = true;
   try {
-    await execFileAsync('schtasks.exe', ['/Run', '/TN', 'Terrones POS - Actualizar']);
+    await execFileAsync('schtasks.exe', ['/Run', '/TN', UPDATER_TASK]);
   } catch (_) {
     // La tarea también se ejecuta cada minuto; conservar la solicitud evita
     // perder una actualización por un fallo transitorio de /Run.
@@ -164,4 +261,6 @@ async function requestInstall({ visorVersion, visorExecutable, root = rootPath()
   return { ok: true, triggered };
 }
 
-module.exports = { compareVersions, getStatus, pathsFor, publicKeyFromXml, readVerifiedFeed, requestInstall };
+module.exports = {
+  INSTALL_PHASES, compareVersions, getStatus, pathsFor, preflight, publicKeyFromXml, readVerifiedFeed, requestInstall,
+};

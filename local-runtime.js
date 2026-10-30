@@ -197,6 +197,15 @@ function listProfileStatus() {
   });
 }
 
+async function assertDatabaseRunning(profileId) {
+  const paths = runtimePaths(profileId);
+  if (!(await dockerReady())) throw new Error('Docker no está iniciado; espera a que Terrones POS termine de abrir y vuelve a intentarlo.');
+  let running = '';
+  try { running = (await execFileAsync('docker.exe', [...composeArgs(paths), 'ps', '-q', '--status', 'running', 'db'], { cwd: paths.app })).stdout; }
+  catch (_) { running = ''; }
+  if (!running) throw new Error('La base de datos local no está iniciada; reinicia Terrones POS antes de actualizar.');
+}
+
 async function diagnostics(profileId) {
   const paths = runtimePaths(profileId);
   let containers = '';
@@ -227,7 +236,7 @@ async function ensureLocalRuntime(report = () => {}) {
 }
 
 module.exports = {
-  LOCAL_URL, diagnostics, ensureLocalRuntime, importProvision, listProfileStatus, localHealth,
+  LOCAL_URL, assertDatabaseRunning, diagnostics, ensureLocalRuntime, importProvision, listProfileStatus, localHealth,
   readProvisioningInfo, readSyncStatus, runBackup, runtimePaths, startApplication, stopApplication,
   startBackground, switchProfile, waitForApplication,
 };
