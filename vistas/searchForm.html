@@ -20,44 +20,22 @@
         />
         <button type="submit" class="btn btn-primary">Buscar</button>
       </form>
-      <button type="button" id="setDownloadPath" class="btn btn-secondary mt-2">
-        Establecer ruta de descarga
-      </button>
       <div id="notification" class="mt-2"></div>
+      <p class="text-muted mt-2">La búsqueda se abrirá en el navegador y requiere internet.</p>
       <p>Presione la tecla <strong>F7</strong> para cerrar esta ventana.</p>
     </div>
     <script>
       document.addEventListener("DOMContentLoaded", () => {
         try {
-          const { ipcRenderer } = require("electron");
-          const Swal = require("sweetalert2");
-          console.log("Electron ipcRenderer cargado correctamente.");
-
-          // Cargar la ruta de descarga previamente seleccionada si existe
-          const savedDownloadPath = localStorage.getItem("downloadPath");
-          console.log(`Ruta de descarga guardada: ${savedDownloadPath}`);
-
-          if (savedDownloadPath) {
-            ipcRenderer.send("set-download-path", savedDownloadPath);
-          }
+          const bridge = window.terrones.search;
 
           // Escuchar las respuestas del proceso principal
-          ipcRenderer.on("download-success", (event, arg) => {
-            Swal.close();
-            Swal.fire(
-              "Éxito",
-              "La imagen ha sido descargada con éxito",
-              "success"
-            );
+          bridge.onSuccess(() => {
+            document.getElementById('notification').textContent = 'La búsqueda se abrió en el navegador.';
           });
 
-          ipcRenderer.on("download-error", (event, arg) => {
-            Swal.close();
-            Swal.fire(
-              "Error",
-              "Ha ocurrido un error al descargar la imagen",
-              "error"
-            );
+          bridge.onError(() => {
+            document.getElementById('notification').textContent = 'No fue posible descargar la imagen. Esta función requiere internet.';
           });
 
           document
@@ -71,31 +49,15 @@
               searchQuery = searchQuery.replace(/[^a-zA-Z0-9 ]/g, "");
               console.log(`Consulta de búsqueda sanitizada: ${searchQuery}`);
 
-              // Mostrar el modal de carga
-              Swal.fire({
-                title: 'Cargando...',
-                text: 'Por favor espere mientras se realiza la búsqueda y descarga.',
-                allowOutsideClick: false,
-                didOpen: () => {
-                  Swal.showLoading();
-                }
-              });
-
-              ipcRenderer.send("perform-search", searchQuery);
-            });
-
-          document
-            .getElementById("setDownloadPath")
-            .addEventListener("click", function (e) {
-              console.log("Botón setDownloadPath clickeado.");
-              ipcRenderer.send("select-download-path");
+              document.getElementById('notification').textContent = 'Abriendo búsqueda web…';
+              bridge.perform(searchQuery);
             });
 
           // Agregar la función para cerrar la ventana con F7
           window.addEventListener("keydown", (e) => {
             if (e.key === "F7") {
               console.log("Tecla F7 presionada. Cerrando ventana.");
-              ipcRenderer.send("close-window");
+              window.terrones.window.close();
             }
           });
         } catch (error) {

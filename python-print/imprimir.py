@@ -2,11 +2,13 @@ import win32print
 import win32api
 import logging
 import json
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, abort
 from flask_cors import CORS  # Importa flask_cors
 import unicodedata
 from PIL import Image
 import sys
+import os
+from pathlib import Path
 import datetime
 from datetime import datetime, timedelta
 
@@ -16,10 +18,39 @@ def quitar_acentos(texto):
 
 
 app = Flask(__name__)
-CORS(app)  # Habilita CORS para todas las rutas
+ALLOWED_ORIGINS = {'http://localhost:8080', 'http://127.0.0.1:8080'}
+CORS(app, resources={r"/*": {"origins": list(ALLOWED_ORIGINS)}})
 
 HTTP_STATUS_OK = 200
 HTTP_STATUS_SERVER_ERROR = 500
+
+
+@app.before_request
+def limitar_origen_local():
+    origin = request.headers.get('Origin')
+    if origin and origin not in ALLOWED_ORIGINS:
+        abort(403)
+
+
+@app.route('/health', methods=['GET'])
+def health():
+    try:
+        printer_name = win32print.GetDefaultPrinter()
+        return jsonify({
+            'ok': True,
+            'service': 'terrones-print',
+            'printerConfigured': True,
+            'printer': printer_name,
+        }), HTTP_STATUS_OK
+    except Exception as error:
+        # El POS puede seguir vendiendo aunque la impresora esté desconectada;
+        # el visor muestra este diagnóstico sin confundirlo con una caída local.
+        return jsonify({
+            'ok': True,
+            'service': 'terrones-print',
+            'printerConfigured': False,
+            'printerError': str(error),
+        }), HTTP_STATUS_OK
 
 
 # Ajuste de la función proporcionada
@@ -592,8 +623,10 @@ def print_receipt_pwa(data):
         raise e
 
 
-# Configura el sistema de registro
-logging.basicConfig(filename='error_log_python.txt',
+# El ejecutable instalado no escribe dentro de Program Files ni del repositorio.
+log_root = Path(os.environ.get('PROGRAMDATA', Path.home())) / 'TerronesPOS' / 'logs'
+log_root.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(filename=str(log_root / 'print-service.log'),
                     level=logging.ERROR, format='%(asctime)s - %(message)s')
 
 
@@ -954,4 +987,4 @@ def imprimirCorte():
 
 
 if __name__ == '__main__':
-    app.run(host='localhost', port=3001, debug=False)
+    app.run(host='127.0.0.1', port=3001, debug=False)

@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "profiles": [
+    {
+      "id": "tunkitos",
+      "displayName": "Tunkitos",
+      "cloudUrl": "https://tunkitos.terrones.dev",
+      "enrollmentUrl": "https://provision.terrones.dev",
+      "syncHost": "sync.terrones.dev",
+      "syncPort": 2222,
+      "reversePort": 13306,
+      "localServerId": 101,
+      "cloudServerId": 201
+    },
+    {
+      "id": "papeleria",
+      "displayName": "Papelería",
+      "cloudUrl": "https://papeleria.terrones.dev",
+      "enrollmentUrl": "https://provision.terrones.dev",
+      "syncHost": "sync.terrones.dev",
+      "syncPort": 2223,
+      "reversePort": 13306,
+      "localServerId": 102,
+      "cloudServerId": 202
+    }
+  ]
+}

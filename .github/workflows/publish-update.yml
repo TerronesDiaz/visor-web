@@ -1,0 +1,108 @@
+name: Publish visor update
+
+on:
+  push:
+    tags: ['visor-v*']
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      TERRONES_UPDATE_SIGNING_PRIVATE_XML: ${{ secrets.TERRONES_UPDATE_SIGNING_PRIVATE_XML }}
+      UPDATE_HOST: 148.113.180.61
+      UPDATE_PORT: '57910'
+      UPDATE_USER: ubuntu
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate tag and detect an existing release
+        id: release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $version = '${{ github.ref_name }}'.Replace('visor-v','')
+          if ($version -ne (Get-Content package.json -Raw | ConvertFrom-Json).version) { throw 'El tag no coincide con package.json.' }
+          $existing = $false
+          foreach ($attempt in 1..3) {
+            gh release view '${{ github.ref_name }}' *> $null
+            if ($LASTEXITCODE -eq 0) { $existing = $true; break }
+            Start-Sleep -Seconds 2
+          }
+          "existing=$($existing.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          # gh conserva exit code 1 cuando el release aún no existe. La ausencia
+          # es el caso esperado para una etiqueta nueva, no un fallo del job.
+          exit 0
+      - name: Restore and verify existing release
+        if: steps.release.outputs.existing == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          New-Item -ItemType Directory -Path existing,upload/feed,artifacts -Force | Out-Null
+          gh release download '${{ github.ref_name }}' --dir existing
+          node scripts/Verify-TerronesUpdateFeed.js existing visor update-public-key.xml
+          $manifest = Get-Content existing/latest.json -Raw | ConvertFrom-Json
+          if ($manifest.version -ne (Get-Content package.json -Raw | ConvertFrom-Json).version) { throw 'El release existente tiene otra versión.' }
+          $assets = @('existing/latest.json','existing/latest.json.sig',(Join-Path existing $manifest.package.name))
+          Copy-Item -LiteralPath $assets -Destination upload/feed/
+          tar.exe -cf artifacts/gateway-release.tar -C upload feed
+      - name: Test and build installer
+        if: steps.release.outputs.existing != 'true'
+        shell: pwsh
+        run: |
+          $version = '${{ github.ref_name }}'.Replace('visor-v','')
+          if ($version -ne (Get-Content package.json -Raw | ConvertFrom-Json).version) { throw 'El tag no coincide con package.json.' }
+          if (-not $env:TERRONES_UPDATE_SIGNING_PRIVATE_XML) { throw 'Falta la clave de firma.' }
+          npm ci
+          if ($LASTEXITCODE -ne 0) { throw 'Fallo al instalar dependencias.' }
+          npm test
+          if ($LASTEXITCODE -ne 0) { throw 'Las pruebas del visor fallaron.' }
+          npm run instalar
+          if ($LASTEXITCODE -ne 0) { throw 'Fallo al construir el visor.' }
+          $env:ELECTRON_RUN_AS_NODE = $null
+          node node_modules/electron/install.js
+          if ($LASTEXITCODE -ne 0) { throw 'No fue posible preparar Electron para la prueba.' }
+          $env:TERRONES_SMOKE_MODULE_ROOT = (Resolve-Path 'dist/win-unpacked/resources/app.asar').Path
+          $smoke = Start-Process -FilePath (Resolve-Path 'node_modules/electron/dist/electron.exe').Path -ArgumentList 'tests/window-smoke.cjs' -WindowStyle Hidden -Wait -PassThru
+          if ($smoke.ExitCode -ne 0) { Get-Content runtime/window-smoke/result.json; throw 'Fallo de apertura con los modulos empaquetados.' }
+          $setup = Get-ChildItem dist -Filter '*.exe' -File | Where-Object Name -NotMatch 'blockmap' | Select-Object -First 1
+          if (-not $setup) { throw 'No se generó el instalador del visor.' }
+          New-Item -ItemType Directory -Path feed,upload/feed,artifacts -Force | Out-Null
+          node scripts/Sign-TerronesUpdateFeed.js $setup.FullName feed 'Corrige la espera de fotogramas al abrir la tienda, conserva errores de carga y cierra el arbol de procesos de impresion.'
+          Copy-Item feed/* upload/feed/
+          tar.exe -cf artifacts/gateway-release.tar -C upload feed
+      - name: Publish private GitHub release
+        if: steps.release.outputs.existing != 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = @(Get-ChildItem feed -File | ForEach-Object FullName)
+          gh release create "${{ github.ref_name }}" @assets --title "visor-web ${{ github.ref_name }}" --notes 'Corrige el bloqueo de apertura cuando la vista no entrega fotogramas. Conserva el error real y la fase de carga en pantalla y registro. Cierra el arbol de procesos de impresion antes de salir. Validado con pruebas unitarias y Electron sobre los modulos empaquetados. Las tareas de Windows sin consola requieren tambien migrar las tareas del POS.'
+      - name: Stage release in private gateway
+        shell: bash
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.UPDATE_RELEASE_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.UPDATE_RELEASE_SSH_KNOWN_HOSTS }}
+        run: |
+          set -euo pipefail
+          test -n "$SSH_PRIVATE_KEY" && test -n "$SSH_KNOWN_HOSTS"
+          ssh_dir="$(mktemp -d)"
+          trap 'rm -rf "$ssh_dir"' EXIT
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$ssh_dir/update_release"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          chmod 600 "$ssh_dir/update_release" "$ssh_dir/known_hosts"
+          ssh -i "$ssh_dir/update_release" -o BatchMode=yes -o IdentitiesOnly=yes \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -p "$UPDATE_PORT" "$UPDATE_USER@$UPDATE_HOST" publish-visor < artifacts/gateway-release.tar
