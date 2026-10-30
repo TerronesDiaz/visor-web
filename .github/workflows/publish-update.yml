@@ -63,6 +63,8 @@ jobs:
         run: |
           $version = '${{ github.ref_name }}'.Replace('visor-v','')
           if ($version -ne (Get-Content package.json -Raw | ConvertFrom-Json).version) { throw 'El tag no coincide con package.json.' }
+          $notesFile = "docs/releases/$version.md"
+          if (-not (Test-Path -LiteralPath $notesFile)) { throw "Falta $notesFile." }
           if (-not $env:TERRONES_UPDATE_SIGNING_PRIVATE_XML) { throw 'Falta la clave de firma.' }
           npm ci
           if ($LASTEXITCODE -ne 0) { throw 'Fallo al instalar dependencias.' }
@@ -79,7 +81,11 @@ jobs:
           $setup = Get-ChildItem dist -Filter '*.exe' -File | Where-Object Name -NotMatch 'blockmap' | Select-Object -First 1
           if (-not $setup) { throw 'No se generó el instalador del visor.' }
           New-Item -ItemType Directory -Path feed,upload/feed,artifacts -Force | Out-Null
-          node scripts/Sign-TerronesUpdateFeed.js $setup.FullName feed 'Corrige la espera de fotogramas al abrir la tienda, conserva errores de carga y cierra el arbol de procesos de impresion.'
+          # The box shows the first paragraph of the release notes, kept ASCII like earlier feeds.
+          $paragraph = Get-Content -LiteralPath $notesFile -Encoding UTF8 | Select-Object -Skip 1 | Where-Object { $_.Trim() } | Select-Object -First 1
+          $feedNotes = (-join ($paragraph.Normalize([Text.NormalizationForm]::FormD).ToCharArray() | Where-Object { [int]$_ -lt 128 })).Trim()
+          if (-not $feedNotes) { throw 'Las notas del release están vacías.' }
+          node scripts/Sign-TerronesUpdateFeed.js $setup.FullName feed $feedNotes
           Copy-Item feed/* upload/feed/
           tar.exe -cf artifacts/gateway-release.tar -C upload feed
       - name: Publish private GitHub release
@@ -89,7 +95,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $assets = @(Get-ChildItem feed -File | ForEach-Object FullName)
-          gh release create "${{ github.ref_name }}" @assets --title "visor-web ${{ github.ref_name }}" --notes 'Corrige el bloqueo de apertura cuando la vista no entrega fotogramas. Conserva el error real y la fase de carga en pantalla y registro. Cierra el arbol de procesos de impresion antes de salir. Validado con pruebas unitarias y Electron sobre los modulos empaquetados. Las tareas de Windows sin consola requieren tambien migrar las tareas del POS.'
+          $version = '${{ github.ref_name }}'.Replace('visor-v','')
+          gh release create "${{ github.ref_name }}" @assets --title "visor-web ${{ github.ref_name }}" --notes-file "docs/releases/$version.md"
       - name: Stage release in private gateway
         shell: bash
         env:

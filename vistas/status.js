@@ -12,6 +12,10 @@ const versions = document.getElementById('versions');
 const releaseNotes = document.getElementById('releaseNotes');
 const installUpdate = document.getElementById('installUpdate');
 const updateProgress = document.getElementById('updateProgress');
+const installPhases = document.getElementById('installPhases');
+const lastAttempt = document.getElementById('lastAttempt');
+const openLog = document.getElementById('openLog');
+const cloudUpdate = document.getElementById('cloudUpdate');
 const profileList = document.getElementById('profileList');
 const newProfile = document.getElementById('newProfile');
 const enrollmentCode = document.getElementById('enrollmentCode');
@@ -27,6 +31,37 @@ const labels = {
   error: 'Error de sincronización',
   disabled: 'Nube no configurada',
 };
+
+// Same phase ids as update-runtime.js INSTALL_PHASES and Show-UpdateProgress.ps1.
+const phaseLabels = [
+  ['prepare', 'Preparar la actualización'],
+  ['backup', 'Respaldar la base de datos'],
+  ['install', 'Instalar la versión nueva'],
+  ['migrate', 'Actualizar la base de datos'],
+  ['start', 'Iniciar Terrones POS'],
+  ['verify', 'Comprobar que todo funcione'],
+];
+
+function describeCloudUpdate(update) {
+  if (!update) return 'Sin dato';
+  if (update.state === 'completed') return `Al día${update.version ? ` (${update.version})` : ''}`;
+  if (update.state === 'waiting') return update.message || 'Esperando esta caja';
+  if (update.state === 'installing') return 'Actualizándose…';
+  if (update.state === 'blocked') return `Detenida: ${update.message || 'sin detalle'}`;
+  if (update.state === 'error') return `Error: ${update.message || 'sin detalle'}`;
+  return update.message || update.state || 'Sin dato';
+}
+
+function renderPhases(install) {
+  const current = phaseLabels.findIndex(([id]) => id === install.phase);
+  installPhases.replaceChildren(...phaseLabels.map(([, label], index) => {
+    const item = document.createElement('li');
+    if (current >= 0 && index < current) { item.className = 'done'; item.textContent = `✓ ${label}`; }
+    else if (index === current) { item.className = 'current'; item.textContent = `► ${label}`; }
+    else item.textContent = `○ ${label}`;
+    return item;
+  }));
+}
 
 function formatDate(value) {
   if (!value) return 'Sin registro';
@@ -45,6 +80,7 @@ function render(status) {
   pending.textContent = String(sync.pendingMedia ?? 0);
   error.textContent = syncState === 'error' ? (sync.message || 'Error sin detalle') : 'Ninguno';
   cloudVersion.textContent = sync.cloudAppVersion || 'Sin registro';
+  cloudUpdate.textContent = describeCloudUpdate(sync.cloudUpdate);
   if (status.updates) renderUpdates(status.updates);
 }
 
@@ -53,6 +89,18 @@ function renderUpdates(update) {
   versions.textContent = `POS instalado: ${update.installed.pos} · Visor instalado: ${update.installed.visor}` +
     (update.available.pos || update.available.visor ? ` · Disponible: ${update.available.pos || update.available.visor}` : '');
   releaseNotes.textContent = update.notes || '';
+  installPhases.hidden = !(update.state === 'installing' && update.install);
+  if (!installPhases.hidden) renderPhases(update.install);
+  const attempt = update.lastAttempt;
+  // An error is already the main message; repeating it here would only add noise.
+  lastAttempt.hidden = !attempt || update.state === 'error' || update.state === 'installing';
+  if (!lastAttempt.hidden) {
+    const succeeded = attempt.state === 'completed';
+    lastAttempt.className = succeeded ? 'ok' : 'failed';
+    lastAttempt.textContent = `Último intento (${formatDate(attempt.at)}): ${succeeded ? '✓' : '✗'} ${attempt.message}`
+      + (attempt.error ? ` ${attempt.error}` : '');
+  }
+  openLog.hidden = !(update.install?.log || attempt?.log);
   installUpdate.hidden = !update.canInstall;
   installUpdate.disabled = update.state === 'installing';
   const total = Number(update.progress?.totalBytes || 0);
@@ -131,6 +179,10 @@ installUpdate.addEventListener('click', async () => {
     updateState.textContent = exception.message;
     installUpdate.disabled = false;
   }
+});
+openLog.addEventListener('click', async () => {
+  try { await window.terrones.updates.openLog(); }
+  catch (exception) { updateState.textContent = exception.message; }
 });
 document.getElementById('diagnostics').addEventListener('click', async () => {
   output.style.display = 'block';

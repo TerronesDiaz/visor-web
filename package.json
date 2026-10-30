@@ -1,6 +1,6 @@
 {
   "name": "visor-web",
-  "version": "3.0.3",
+  "version": "3.1.0",
   "description": "Programa para abrir el POS en la web e imprimir tickets",
   "scripts": {
     "start": "electron main.js",
@@ -48,6 +48,10 @@
       {
         "from": "dist/print-service/terrones-print-service.exe",
         "to": "print-service/terrones-print-service.exe"
+      },
+      {
+        "from": "scripts/Show-UpdateProgress.ps1",
+        "to": "update/Show-UpdateProgress.ps1"
       }
     ],
     "asar": true,

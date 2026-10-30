@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('terrones', {
   updates: {
     check: () => ipcRenderer.invoke('update:check'),
     install: () => ipcRenderer.invoke('update:install'),
+    openLog: () => ipcRenderer.invoke('update:open-log'),
   },
   window: {
     close: () => ipcRenderer.send('close-window'),

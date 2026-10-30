@@ -541,13 +541,48 @@ ipcMain.on('runtime:show-status', () => {
   createStatusWindow();
   sendRuntimeStatus({ ...currentRuntimeStatus, sync: localRuntime.readSyncStatus() });
 });
+function checkActiveDatabase() {
+  const activeProfileId = profileStore.getActiveProfileId();
+  return activeProfileId ? localRuntime.assertDatabaseRunning(activeProfileId) : Promise.resolve();
+}
+
+// The updater waits for visor-web to exit, so progress is shown by a separate PowerShell window.
+function showUpdateProgress(version, requestedAt) {
+  const script = app.isPackaged
+    ? path.join(process.resourcesPath, 'update', 'Show-UpdateProgress.ps1')
+    : path.join(__dirname, 'scripts', 'Show-UpdateProgress.ps1');
+  if (!fs.existsSync(script)) {
+    logger.warn(`No se encontró la ventana de progreso: ${script}`);
+    return;
+  }
+  const child = spawn('powershell.exe', [
+    '-NoProfile', '-ExecutionPolicy', 'Bypass', '-WindowStyle', 'Hidden', '-File', script,
+    '-InstallRoot', updateRuntime.pathsFor().root, '-Version', version || '', '-RequestedAt', requestedAt,
+  ], { detached: true, stdio: 'ignore', windowsHide: true });
+  child.on('error', (error) => logger.warn(`No se pudo abrir la ventana de progreso: ${error.message}`));
+  child.unref();
+}
+
 ipcMain.handle('update:check', () => updateRuntime.getStatus(app.getVersion()));
+ipcMain.handle('update:open-log', async () => {
+  const status = updateRuntime.getStatus(app.getVersion());
+  const log = status.install?.log || status.lastAttempt?.log;
+  const logsRoot = path.join(updateRuntime.pathsFor().root, 'logs') + path.sep;
+  if (!log || !path.resolve(log).toLowerCase().startsWith(logsRoot.toLowerCase()) || !fs.existsSync(log)) {
+    throw new Error('Este intento no dejó un registro detallado.');
+  }
+  const failure = await shell.openPath(log);
+  if (failure) throw new Error(failure);
+});
 ipcMain.handle('update:install', async (event) => {
   const senderUrl = event.senderFrame?.url || '';
   if (!senderUrl.endsWith('/vistas/status.html')) throw new Error('La actualización solo puede iniciarse desde la ventana de estado.');
   if (updateInstallPending) throw new Error('Ya se está solicitando una actualización.');
   updateInstallPending = true;
   try {
+    // Refuse before asking, so the POS is never closed for an update that cannot run.
+    const check = await updateRuntime.preflight({ visorVersion: app.getVersion(), checkDatabase: checkActiveDatabase });
+    if (!check.ok) throw new Error(check.problems.join(' '));
     let modalVisible = false;
     if (posWindow && !posWindow.isDestroyed()) {
       modalVisible = await mainWindow.contents.executeJavaScript("Boolean(document.querySelector('.modal.show,[role=dialog][open]'))", true).catch(() => false);
@@ -559,13 +594,18 @@ ipcMain.handle('update:install', async (event) => {
       cancelId: 1,
       title: 'Instalar actualización',
       message: modalVisible ? 'Hay una ventana de cobro abierta.' : 'La actualización cerrará Terrones POS durante unos minutos.',
-      detail: 'Cancela cualquier cobro o abono en curso y confirma que no hay una venta editándose antes de continuar.',
+      detail: 'Cancela cualquier cobro o abono en curso y confirma que no hay una venta editándose antes de continuar.\n\n'
+        + 'Una ventana mostrará el avance (de 5 a 10 minutos). Terrones POS se abrirá solo al terminar.',
     });
     if (confirmation.response !== 0) {
       updateInstallPending = false;
       return { canceled: true };
     }
-    const result = await updateRuntime.requestInstall({ visorVersion: app.getVersion(), visorExecutable: process.execPath });
+    const requestedAt = new Date().toISOString();
+    const result = await updateRuntime.requestInstall({
+      visorVersion: app.getVersion(), visorExecutable: process.execPath, checkDatabase: checkActiveDatabase,
+    });
+    showUpdateProgress(check.status.available.pos || check.status.available.visor, requestedAt);
     logger.info('Actualización verificada solicitada; cerrando el visor.');
     setTimeout(() => app.quit(), 500);
     return result;
