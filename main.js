@@ -329,6 +329,12 @@ async function bootLocalFirst() {
   sendRuntimeStatus({ state: 'starting', phase: 'bootstrap', message: 'Preparando tu punto de venta…' });
   bootPromise = (async () => {
     try {
+      // Opened again in the middle of an update: starting Docker here would bring back
+      // the POS the updater stopped to back it up.
+      if (updateRuntime.updateActivity().active) {
+        if (!await waitForUpdate()) return;
+        sendRuntimeStatus({ state: 'starting', phase: 'bootstrap', message: 'Preparando tu punto de venta…' });
+      }
       const result = await localRuntime.ensureLocalRuntime(sendRuntimeStatus);
       if (quitting) return;
       if (result.state === 'needs_profile') {
@@ -404,7 +410,7 @@ async function openPreparedPos() {
 }
 
 ipcMain.handle('runtime:retry', () => bootLocalFirst());
-ipcMain.handle('runtime:open-pos', () => openPreparedPos());
+ipcMain.handle('runtime:open-pos', () => { assertNoUpdateRunning(); return openPreparedPos(); });
 ipcMain.handle('runtime:status', () => {
   const activeProfileId = profileStore.getActiveProfileId();
   return {
@@ -426,6 +432,7 @@ ipcMain.handle('profiles:list', () => ({
 }));
 ipcMain.handle('profiles:switch', async (_event, profileId) => {
   if (profileOperationPending) throw new Error('Ya hay una operación de tienda en curso.');
+  assertNoUpdateRunning();
   profileStore.catalogProfile(profileId);
   const modalVisible = posWindow && !posWindow.isDestroyed()
     ? await mainWindow.contents.executeJavaScript("Boolean(document.querySelector('.modal.show,[role=dialog][open],.swal2-container'))", true).catch(() => false)
@@ -461,6 +468,7 @@ ipcMain.handle('profiles:switch', async (_event, profileId) => {
 });
 ipcMain.handle('profiles:enroll', async (_event, profileId, code) => {
   if (profileOperationPending) throw new Error('Ya hay una operación de tienda en curso.');
+  assertNoUpdateRunning();
   profileStore.catalogProfile(profileId);
   profileOperationPending = true;
   try {
@@ -484,6 +492,7 @@ ipcMain.handle('profiles:enroll', async (_event, profileId, code) => {
 });
 ipcMain.handle('profiles:finalize', async (_event, profileId) => {
   if (profileOperationPending) throw new Error('Ya hay una operación de tienda en curso.');
+  assertNoUpdateRunning();
   const profile = profileStore.getProfile(profileId);
   const confirmation = await dialog.showMessageBox(statusWindow || posWindow || undefined, {
     type: 'warning', buttons: ['Finalizar y habilitar ventas', 'Cancelar'], defaultId: 1, cancelId: 1,
@@ -546,7 +555,8 @@ function checkActiveDatabase() {
   return activeProfileId ? localRuntime.assertDatabaseRunning(activeProfileId) : Promise.resolve();
 }
 
-// The updater waits for visor-web to exit, so progress is shown by a separate PowerShell window.
+// Shown whenever the visor is closed during an update: always with an updater that waits
+// for visor-web to exit before starting, and only for the visor's own step otherwise.
 function showUpdateProgress(version, requestedAt) {
   const script = app.isPackaged
     ? path.join(process.resourcesPath, 'update', 'Show-UpdateProgress.ps1')
@@ -561,6 +571,61 @@ function showUpdateProgress(version, requestedAt) {
   ], { detached: true, stdio: 'ignore', windowsHide: true });
   child.on('error', (error) => logger.warn(`No se pudo abrir la ventana de progreso: ${error.message}`));
   child.unref();
+}
+
+function closeForUpdate(activity, reason) {
+  const request = activity.request || {};
+  showUpdateProgress(request.posVersion || request.visorVersion, request.requestedAt || new Date().toISOString());
+  logger.info(reason);
+  setTimeout(() => app.quit(), 500);
+}
+
+// The POS stays covered while the updater works, so nobody sells against a database
+// being backed up or migrated, and the visor starts nothing in Docker meanwhile.
+// Resolves with the final activity, or null when the visor closes for its own step.
+async function waitForUpdate() {
+  createStartupWindow(false);
+  for (;;) {
+    if (quitting) return null;
+    const activity = updateRuntime.updateActivity();
+    if (!activity.active) return activity;
+    if (!activity.request?.visorOpen) {
+      closeForUpdate(activity, 'Actualización en curso con un actualizador que espera el cierre del visor; cerrando.');
+      return null;
+    }
+    if (activity.progress?.phase === 'visor') {
+      closeForUpdate(activity, 'El actualizador va a instalar el visor; cerrando.');
+      return null;
+    }
+    sendRuntimeStatus({
+      state: 'updating',
+      phase: 'update',
+      updatePhase: activity.progress?.phase || 'prepare',
+      message: activity.progress?.message || 'Preparando la actualización…',
+      version: activity.request?.posVersion || activity.request?.visorVersion || '',
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+}
+
+function assertNoUpdateRunning() {
+  if (updateRuntime.updateActivity().active) throw new Error('Hay una actualización en curso; espera a que termine.');
+}
+
+async function followUpdateInWindow() {
+  const finished = await waitForUpdate();
+  if (!finished) return;
+  updateInstallPending = false;
+  if (finished.progress?.phase === 'failed') {
+    sendRuntimeStatus({
+      state: 'update_failed',
+      phase: 'update',
+      message: finished.progress.message || 'La actualización no se completó.',
+      error: finished.progress.error || '',
+    });
+    return;
+  }
+  await bootLocalFirst();
 }
 
 ipcMain.handle('update:check', () => updateRuntime.getStatus(app.getVersion()));
@@ -587,15 +652,24 @@ ipcMain.handle('update:install', async (event) => {
     if (posWindow && !posWindow.isDestroyed()) {
       modalVisible = await mainWindow.contents.executeJavaScript("Boolean(document.querySelector('.modal.show,[role=dialog][open]'))", true).catch(() => false);
     }
+    // An updater registered before this version waits for the visor to exit first.
+    const visorOpen = updateRuntime.updaterFeatures().includes('visor-abierto');
+    const visorStep = check.status.available.visor
+      ? ' Al final el visor se cerrará un momento para actualizarse y se abrirá solo.'
+      : '';
     const confirmation = await dialog.showMessageBox(statusWindow || undefined, {
       type: modalVisible ? 'warning' : 'question',
-      buttons: ['Instalar y cerrar el POS', 'Cancelar'],
+      buttons: [visorOpen ? 'Instalar actualización' : 'Instalar y cerrar el POS', 'Cancelar'],
       defaultId: 1,
       cancelId: 1,
       title: 'Instalar actualización',
-      message: modalVisible ? 'Hay una ventana de cobro abierta.' : 'La actualización cerrará Terrones POS durante unos minutos.',
+      message: modalVisible
+        ? 'Hay una ventana de cobro abierta.'
+        : (visorOpen ? 'Terrones POS no se podrá usar durante la actualización.' : 'La actualización cerrará Terrones POS durante unos minutos.'),
       detail: 'Cancela cualquier cobro o abono en curso y confirma que no hay una venta editándose antes de continuar.\n\n'
-        + 'Una ventana mostrará el avance (de 5 a 10 minutos). Terrones POS se abrirá solo al terminar.',
+        + (visorOpen
+          ? `Esta ventana mostrará el avance (de 5 a 10 minutos) y el POS volverá solo al terminar.${visorStep}`
+          : 'Una ventana mostrará el avance (de 5 a 10 minutos). Terrones POS se abrirá solo al terminar.'),
     });
     if (confirmation.response !== 0) {
       updateInstallPending = false;
@@ -603,11 +677,20 @@ ipcMain.handle('update:install', async (event) => {
     }
     const requestedAt = new Date().toISOString();
     const result = await updateRuntime.requestInstall({
-      visorVersion: app.getVersion(), visorExecutable: process.execPath, checkDatabase: checkActiveDatabase,
+      visorVersion: app.getVersion(), visorExecutable: process.execPath, visorOpen, checkDatabase: checkActiveDatabase,
     });
-    showUpdateProgress(check.status.available.pos || check.status.available.visor, requestedAt);
-    logger.info('Actualización verificada solicitada; cerrando el visor.');
-    setTimeout(() => app.quit(), 500);
+    if (!visorOpen) {
+      showUpdateProgress(check.status.available.pos || check.status.available.visor, requestedAt);
+      logger.info('Actualización verificada solicitada; cerrando el visor.');
+      setTimeout(() => app.quit(), 500);
+      return result;
+    }
+    logger.info('Actualización verificada solicitada; el visor muestra el avance.');
+    if (statusWindow && !statusWindow.isDestroyed()) statusWindow.close();
+    followUpdateInWindow().catch((error) => {
+      updateInstallPending = false;
+      showRuntimeError(error.message);
+    });
     return result;
   } catch (error) {
     updateInstallPending = false;

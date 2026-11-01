@@ -4,7 +4,24 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const test = require('node:test');
-const { INSTALL_PHASES, compareVersions, getStatus, preflight, readVerifiedFeed } = require('../update-runtime');
+const { spawn } = require('node:child_process');
+const {
+  INSTALL_PHASES, compareVersions, getStatus, preflight, readVerifiedFeed, updateActivity, updaterFeatures,
+} = require('../update-runtime');
+
+// Holds the lock the way Invoke-TerronesUpdate.ps1 does: open, without sharing.
+async function holdLock(file) {
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  const holder = spawn('powershell.exe', ['-NoProfile', '-Command',
+    `$f=[IO.File]::Open('${file.replace(/'/g, "''")}','OpenOrCreate','ReadWrite','None'); [Console]::In.ReadLine() | Out-Null; $f.Dispose()`]);
+  const deadline = Date.now() + 15000;
+  for (;;) {
+    try { fs.closeSync(fs.openSync(file, 'r')); } catch (error) { if (error.code === 'EBUSY') break; }
+    if (Date.now() > deadline) { holder.kill(); throw new Error('PowerShell did not take the lock.'); }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  return () => new Promise((resolve) => { holder.on('exit', resolve); holder.stdin.end('\n'); });
+}
 
 test('compara versiones de cuatro segmentos', () => {
   assert.equal(compareVersions('2026.08.07.2', '2026.08.07.1'), 1);
@@ -105,7 +122,7 @@ test('registra cada intento terminado una sola vez y conserva su registro', () =
   }
 });
 
-test('muestra la fase de instalación y libera una instalación abandonada', () => {
+test('muestra la fase de instalación y libera una instalación abandonada', async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'terrones-update-phase-'));
   try {
     const keyFile = writeSignedPosFeed(root);
@@ -124,9 +141,13 @@ test('muestra la fase de instalación y libera una instalación abandonada', () 
     assert.equal(abandoned.canInstall, true);
     assert.match(abandoned.message, /interrumpió/);
 
-    fs.mkdirSync(path.join(root, 'updates'), { recursive: true });
+    // A restart leaves the file behind; nobody holds it, so it does not count as running.
     fs.writeFileSync(path.join(root, 'updates', 'install.lock'), '');
-    assert.equal(getStatus('3.0.3', root, keyFile).state, 'installing', 'An updater holding its lock is still running');
+    assert.equal(getStatus('3.0.3', root, keyFile).state, 'error', 'A leftover lock file must not keep the box installing');
+    const release = await holdLock(path.join(root, 'updates', 'install.lock'));
+    try {
+      assert.equal(getStatus('3.0.3', root, keyFile).state, 'installing', 'An updater holding its lock is still running');
+    } finally { await release(); }
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }
@@ -163,4 +184,53 @@ test('la ventana de progreso se empaqueta con BOM y usa las mismas fases', () =>
   }
   const build = require('../package.json').build;
   assert.ok(build.extraResources.some((entry) => entry.from === 'scripts/Show-UpdateProgress.ps1' && entry.to === 'update/Show-UpdateProgress.ps1'));
+});
+
+test('detecta una actualización en curso aunque el visor se vuelva a abrir', async () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'terrones-update-activity-'));
+  try {
+    assert.equal(updateActivity(root).active, false);
+    fs.mkdirSync(path.join(root, 'updates'), { recursive: true });
+    fs.mkdirSync(path.join(root, 'state'), { recursive: true });
+    const requestedAt = new Date().toISOString();
+    fs.writeFileSync(path.join(root, 'updates', 'request.json'), JSON.stringify({ posVersion: '2026.11.02.1', visorOpen: true, requestedAt }));
+    // An earlier attempt's progress must not be read as this one's.
+    fs.writeFileSync(path.join(root, 'state', 'update-progress.json'), JSON.stringify({ phase: 'visor', updatedAt: '2026-10-01T00:00:00Z' }));
+    const pending = updateActivity(root);
+    assert.equal(pending.active, true, 'A request the updater has not claimed yet is still an update');
+    assert.equal(pending.progress, null);
+    assert.equal(pending.request.visorOpen, true);
+
+    const release = await holdLock(path.join(root, 'updates', 'install.lock'));
+    try {
+      fs.writeFileSync(path.join(root, 'state', 'update-progress.json'), JSON.stringify({ phase: 'migrate', message: 'Actualizando…', updatedAt: new Date().toISOString() }));
+      const running = updateActivity(root, Date.now() + 60 * 60 * 1000);
+      assert.equal(running.active, true, 'A held lock is running however long it takes');
+      assert.equal(running.progress.phase, 'migrate');
+    } finally { await release(); }
+
+    // A request nobody claimed (old updater stuck on a leftover lock) must not block the box.
+    const abandoned = updateActivity(root, Date.now() + 10 * 60 * 1000);
+    assert.equal(abandoned.active, false);
+    assert.equal(abandoned.stale, true);
+    const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+    fs.utimesSync(path.join(root, 'updates', 'request.json'), tenMinutesAgo, tenMinutesAgo);
+    fs.writeFileSync(path.join(root, 'state', 'update-progress.json'), JSON.stringify({ phase: 'migrate', updatedAt: tenMinutesAgo.toISOString() }));
+    const check = await preflight({ visorVersion: '3.2.0', root, free: 1024 ** 4 });
+    assert.ok(check.problems.some((problem) => /quedó sin terminar/.test(problem)), check.problems.join(' | '));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('lee las capacidades del actualizador instalado', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'terrones-update-features-'));
+  try {
+    assert.deepEqual(updaterFeatures(root), [], 'An updater without capabilities.json closes the visor first');
+    fs.mkdirSync(path.join(root, 'updater'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'updater', 'capabilities.json'), JSON.stringify({ schema: 1, features: ['visor-abierto', 'recuperacion'] }));
+    assert.ok(updaterFeatures(root).includes('visor-abierto'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
 });

@@ -23,6 +23,8 @@ const INSTALL_PHASES = ['prepare', 'backup', 'install', 'migrate', 'start', 'ver
 const HISTORY_LIMIT = 20;
 // An updater that dies without writing its result must not leave the box "installing" forever.
 const STALE_INSTALL_MS = 15 * 60 * 1000;
+// The task runs every minute; a request nobody picks up in this time will not be picked up.
+const UNCLAIMED_REQUEST_MS = 5 * 60 * 1000;
 
 function rootPath() {
   return process.env.TERRONES_POS_HOME || path.join(process.env.ProgramData || 'C:\\ProgramData', 'TerronesPOS');
@@ -39,6 +41,7 @@ function pathsFor(root = rootPath()) {
     installProgress: path.join(root, 'state', 'update-progress.json'),
     history: path.join(root, 'state', 'update-history.json'),
     lock: path.join(root, 'updates', 'install.lock'),
+    capabilities: path.join(root, 'updater', 'capabilities.json'),
     publicKey: path.join(__dirname, 'update-public-key.xml'),
   };
 }
@@ -136,10 +139,50 @@ function recordHistory(paths, install, progress) {
   return attempts;
 }
 
+// The updater keeps install.lock open without sharing while it runs. After a restart the
+// file stays behind, so only an open that fails with EBUSY means an updater is running.
+function lockHeld(paths) {
+  try {
+    fs.closeSync(fs.openSync(paths.lock, 'r'));
+    return false;
+  } catch (error) {
+    return ['EBUSY', 'EPERM', 'EACCES'].includes(error.code);
+  }
+}
+
+// Features of the updater installed in ProgramData, which only an administrator replaces.
+function updaterFeatures(root = rootPath()) {
+  const capabilities = readJson(pathsFor(root).capabilities, null);
+  return capabilities?.schema === 1 && Array.isArray(capabilities.features) ? capabilities.features : [];
+}
+
 function isStale(install, paths, now = Date.now()) {
-  if (install?.state !== 'installing' || fs.existsSync(paths.lock)) return false;
+  if (install?.state !== 'installing' || lockHeld(paths)) return false;
   const updatedAt = Date.parse(install.updatedAt || '');
   return Number.isFinite(updatedAt) && now - updatedAt > STALE_INSTALL_MS;
+}
+
+function modifiedAt(file) {
+  try { return fs.statSync(file).mtimeMs; } catch (_) { return 0; }
+}
+
+// Whether an update is under way, so the visor neither opens the POS nor touches Docker.
+function updateActivity(root = rootPath(), now = Date.now()) {
+  const paths = pathsFor(root);
+  const request = readJson(paths.request, null);
+  // Progress left by an earlier attempt must not be read as this request's.
+  const requestedAt = Date.parse(request?.requestedAt || '');
+  const latest = readInstallProgress(paths);
+  const progress = latest && Number.isFinite(requestedAt) && (Date.parse(latest.updatedAt || '') || 0) < requestedAt - 5000 ? null : latest;
+  if (lockHeld(paths)) return { active: true, stale: false, request, progress };
+  if (!request) return { active: false, stale: false, request: null, progress };
+  const lastSignal = Math.max(
+    modifiedAt(paths.request),
+    Date.parse(progress?.updatedAt || '') || 0,
+    Date.parse(readJson(paths.installStatus, {})?.updatedAt || '') || 0,
+  );
+  const waiting = now - lastSignal < UNCLAIMED_REQUEST_MS;
+  return { active: waiting, stale: !waiting, request, progress };
 }
 
 function getStatus(visorVersion, root = rootPath(), publicKeyFile = path.join(__dirname, 'update-public-key.xml')) {
@@ -212,8 +255,11 @@ async function preflight({ visorVersion, root = rootPath(), checkDatabase, publi
   const status = getStatus(visorVersion, root, publicKeyFile);
   const problems = [];
   if (!status.canInstall) problems.push('No hay una actualización verificada lista para instalar.');
-  if (fs.existsSync(paths.request) || fs.existsSync(paths.lock)) {
+  const activity = updateActivity(root);
+  if (activity.active) {
     problems.push('Ya hay una actualización en curso; espera a que termine.');
+  } else if (activity.stale) {
+    problems.push('La actualización anterior quedó sin terminar y el actualizador no la retomó. Ejecuta una vez Install-TerronesUpdate.ps1 como administrador.');
   }
   try {
     await execFileAsync('schtasks.exe', ['/Query', '/TN', UPDATER_TASK]);
@@ -238,7 +284,7 @@ function writeJsonAtomic(file, value) {
   fs.renameSync(temporary, file);
 }
 
-async function requestInstall({ visorVersion, visorExecutable, root = rootPath(), checkDatabase }) {
+async function requestInstall({ visorVersion, visorExecutable, visorOpen = false, root = rootPath(), checkDatabase }) {
   const check = await preflight({ visorVersion, root, checkDatabase });
   if (!check.ok) throw new Error(check.problems.join(' '));
   const { status } = check;
@@ -248,6 +294,7 @@ async function requestInstall({ visorVersion, visorExecutable, root = rootPath()
     posVersion: status.available.pos,
     visorVersion: status.available.visor,
     visorExecutable,
+    visorOpen,
     requestedAt: new Date().toISOString(),
   });
   let triggered = true;
@@ -263,4 +310,5 @@ async function requestInstall({ visorVersion, visorExecutable, root = rootPath()
 
 module.exports = {
   INSTALL_PHASES, compareVersions, getStatus, pathsFor, preflight, publicKeyFromXml, readVerifiedFeed, requestInstall,
+  updateActivity, updaterFeatures,
 };

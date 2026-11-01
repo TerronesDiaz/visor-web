@@ -8,6 +8,10 @@ param(
 # Shown by the visor right before it closes for an update. The updater cannot run
 # while visor-web is open, so this separate window reports its progress instead.
 $ErrorActionPreference = 'Stop'
+# A visor opened again during the update shows this window too; keep only one.
+$single = New-Object Threading.Mutex($false, 'Local\TerronesPOS-UpdateProgress')
+try { $owned = $single.WaitOne(0) } catch [Threading.AbandonedMutexException] { $owned = $true }
+if (-not $owned) { exit 0 }
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
 [Windows.Forms.Application]::EnableVisualStyles()
