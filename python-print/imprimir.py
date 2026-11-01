@@ -12,6 +12,8 @@ from pathlib import Path
 import datetime
 from datetime import datetime, timedelta
 
+import tickets_cuentas
+
 
 def quitar_acentos(texto):
     return ''.join((c for c in unicodedata.normalize('NFD', texto) if unicodedata.category(c) != 'Mn'))
@@ -23,6 +25,10 @@ CORS(app, resources={r"/*": {"origins": list(ALLOWED_ORIGINS)}})
 
 HTTP_STATUS_OK = 200
 HTTP_STATUS_SERVER_ERROR = 500
+
+# El POS consulta /health para saber qué formatos admite este Visor y ofrecer
+# el PDF cuando el servicio instalado todavía no los tiene.
+CAPACIDADES = ['imprimir', 'imprimirCorte', 'imprimirAbono', 'imprimirEstadoCuenta']
 
 
 @app.before_request
@@ -39,6 +45,7 @@ def health():
         return jsonify({
             'ok': True,
             'service': 'terrones-print',
+            'capacidades': CAPACIDADES,
             'printerConfigured': True,
             'printer': printer_name,
         }), HTTP_STATUS_OK
@@ -48,6 +55,7 @@ def health():
         return jsonify({
             'ok': True,
             'service': 'terrones-print',
+            'capacidades': CAPACIDADES,
             'printerConfigured': False,
             'printerError': str(error),
         }), HTTP_STATUS_OK
@@ -455,20 +463,22 @@ def print_receipt(data):
             else:
                 fecha_venta_str = data['otros_datos']['fechaHora']
                 fecha_emision = fecha_venta_str.split(' - ')[0]
-                fecha_vencimiento = '---'
+                fecha_vencimiento = None
             
             cantidad_letra = numero_a_moneda(monto_credito)
             
-            texto_pagare = (
-                "PAGARÉ\n\n"
-                f"En {domicilio_acreedor} a {fecha_vencimiento}.\n\n"
-                f"Por medio del presente título de crédito yo, {cliente_nombre} (en lo sucesivo referido como \"LA PARTE DEUDORA\"), hago constar que debo y pagaré de manera incondicional y sin excepción alguna la cantidad de ${monto_credito:,.2f} ({cantidad_letra}) a la orden de {acreedor} (en lo sucesivo referido como \"LA PARTE BENEFICIARIA\"), con domicilio ubicado en: {domicilio_acreedor}.\n\n"
-                f"El pago de la cantidad monetaria total adeudada al amparo del presente pagaré deberá ser efectuado por \"LA PARTE DEUDORA\" a \"LA PARTE BENEFICIARIA\" el día {fecha_vencimiento}.\n\n"
-                f"El pago deberá ser realizado en efectivo en el domicilio con la siguiente dirección: {domicilio_acreedor}.\n\n"
-                "______________________________\n"
-                "ACEPTO Y ME OBLIGO AL PAGO\n"
+            # Sin acentos y cortado entre palabras: en UTF-8 la impresora
+            # imprimía basura ("PAGARÃ‰") y partía los renglones a la mitad.
+            texto_pagare = tickets_cuentas.pagare(
+                cliente=cliente_nombre,
+                acreedor=acreedor,
+                domicilio=domicilio_acreedor,
+                fecha_emision=fecha_emision,
+                fecha_vencimiento=fecha_vencimiento,
+                monto=monto_credito,
+                monto_letras=cantidad_letra,
             )
-            win32print.WritePrinter(handle, texto_pagare.encode('utf-8'))
+            win32print.WritePrinter(handle, texto_pagare)
 
         # Si existe data.concepto y no está vacío ni es null, lo imprimimos
         if 'concepto' in data and data['concepto']:
@@ -876,6 +886,24 @@ def handle_preflight():
         response.headers['Access-Control-Allow-Methods'] = 'POST'
         return response
 
+def imprimir_documento(contenido):
+    """Envía logo + contenido ESC/POS ya armado a la impresora predeterminada."""
+    printer_name = win32print.GetDefaultPrinter()
+    handle = win32print.OpenPrinter(printer_name)
+    try:
+        win32print.StartDocPrinter(handle, 1, ("Python_Print_Job", None, "RAW"))
+        win32print.StartPagePrinter(handle)
+        try:
+            win32print.WritePrinter(handle, convert_image_to_bytes(sys.argv[1]))
+        except (FileNotFoundError, IndexError):
+            pass
+        win32print.WritePrinter(handle, contenido)
+        win32print.EndPagePrinter(handle)
+        win32print.EndDocPrinter(handle)
+    finally:
+        win32print.ClosePrinter(handle)
+
+
 # Función para imprimir un ticket de venta
 
 
@@ -984,6 +1012,40 @@ def imprimirCorte():
     finally:
         if handle:
             win32print.ClosePrinter(handle)
+
+
+@app.route('/imprimirAbono', methods=['POST', 'OPTIONS'])
+def imprimirAbono():
+    """Comprobante de un abono a cuentas por cobrar."""
+    preflight = handle_preflight()
+    if preflight:
+        return preflight
+    try:
+        data = request.json
+        valido, mensaje = tickets_cuentas.validar_abono(data)
+        if not valido:
+            return jsonify(error=True, mensaje=mensaje), HTTP_STATUS_SERVER_ERROR
+        imprimir_documento(tickets_cuentas.comprobante_abono(data, en_letras=numero_a_moneda))
+        return jsonify(error=False, mensaje='Impresión completada'), HTTP_STATUS_OK
+    except Exception as e:
+        return jsonify(error=True, mensaje=f'Error inesperado: {e}'), HTTP_STATUS_SERVER_ERROR
+
+
+@app.route('/imprimirEstadoCuenta', methods=['POST', 'OPTIONS'])
+def imprimirEstadoCuenta():
+    """Estado de cuenta compacto de un cliente."""
+    preflight = handle_preflight()
+    if preflight:
+        return preflight
+    try:
+        data = request.json
+        valido, mensaje = tickets_cuentas.validar_estado_cuenta(data)
+        if not valido:
+            return jsonify(error=True, mensaje=mensaje), HTTP_STATUS_SERVER_ERROR
+        imprimir_documento(tickets_cuentas.estado_cuenta(data))
+        return jsonify(error=False, mensaje='Impresión completada'), HTTP_STATUS_OK
+    except Exception as e:
+        return jsonify(error=True, mensaje=f'Error inesperado: {e}'), HTTP_STATUS_SERVER_ERROR
 
 
 if __name__ == '__main__':
