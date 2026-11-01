@@ -16,6 +16,8 @@
     .step { padding:10px; border-radius:10px; background:#0f172a; color:#64748b; font-size:12px; font-weight:700; text-align:center; border:1px solid #334155; }
     .step.active { color:#dbeafe; border-color:#3b82f6; background:#1d4ed733; }
     .step.done { color:#bbf7d0; border-color:#15803d; background:#15803d22; }
+    #updateSteps .step { font-size:15px; text-align:left; }
+    #updateHint { font-size:16px; }
     .status { margin:18px 0; padding:16px; border-radius:12px; background:#0f172a; display:flex; gap:14px; align-items:center; }
     .dot { flex:0 0 auto; width:13px; height:13px; border-radius:50%; background:#3b82f6; box-shadow:0 0 0 7px #3b82f622; }
     .status.error .dot { background:#ef4444; box-shadow:0 0 0 7px #ef444422; }
@@ -73,6 +75,12 @@
       <ul><li>usuario y acceso</li><li>últimos folios y ventas</li><li>existencias, clientes y saldos</li><li>logo, impresión y apertura de cajón</li></ul>
       <button class="success" id="openPos">Abrir POS y validar</button>
     </section>
+
+    <ol class="steps" id="updateSteps" hidden></ol>
+    <p class="hint" id="updateHint" hidden>No apagues la computadora. Terrones POS volverá solo al terminar.</p>
+    <div class="actions" id="updateActions" hidden>
+      <button id="continueAfterUpdate">Abrir Terrones POS</button>
+    </div>
 
     <div class="actions" id="errorActions" hidden>
       <button id="retry">Reintentar</button>

@@ -17,6 +17,33 @@ const enrollmentCode = document.getElementById('enrollmentCode');
 const enrollProfile = document.getElementById('enrollProfile');
 const profileMessage = document.getElementById('profileMessage');
 
+const updateSteps = document.getElementById('updateSteps');
+const updateHint = document.getElementById('updateHint');
+const updateActions = document.getElementById('updateActions');
+const continueAfterUpdate = document.getElementById('continueAfterUpdate');
+
+// Same phase ids as update-runtime.js INSTALL_PHASES.
+const updatePhases = [
+  ['prepare', 'Preparar la actualización'],
+  ['backup', 'Respaldar la base de datos'],
+  ['install', 'Instalar la versión nueva'],
+  ['migrate', 'Actualizar la base de datos'],
+  ['start', 'Iniciar Terrones POS'],
+  ['verify', 'Comprobar que todo funcione'],
+];
+
+function renderUpdateSteps(current) {
+  const index = updatePhases.findIndex(([id]) => id === current);
+  updateSteps.replaceChildren(...updatePhases.map(([, label], position) => {
+    const item = document.createElement('li');
+    item.className = 'step';
+    item.classList.toggle('active', position === index);
+    item.classList.toggle('done', index < 0 ? current === 'visor' : position < index);
+    item.textContent = label;
+    return item;
+  }));
+}
+
 function setStep(active) {
   document.querySelectorAll('.step').forEach((element) => {
     const step = Number(element.dataset.step);
@@ -31,6 +58,25 @@ async function showProvisioningInfo(status) {
 }
 
 function render(status) {
+  const updating = status.state === 'updating';
+  const updateFailed = status.state === 'update_failed';
+  updateSteps.hidden = !updating;
+  updateHint.hidden = !updating;
+  updateActions.hidden = !updateFailed;
+  if (updating || updateFailed) {
+    document.getElementById('heading').textContent = updating
+      ? `Actualizando Terrones POS${status.version ? ` a ${status.version}` : ''}`
+      : 'La actualización no se completó';
+    document.getElementById('setupDescription').hidden = true;
+    document.getElementById('setupSteps').hidden = true;
+    [provisionPanel, profilePanel, readyPanel, errorActions].forEach((panel) => { panel.hidden = true; });
+    message.textContent = status.message || '';
+    detail.textContent = updateFailed ? [status.error, 'Terrones POS sigue con la versión anterior.'].filter(Boolean).join(' ') : '';
+    statusBox.classList.toggle('error', updateFailed);
+    statusBox.classList.remove('ready');
+    if (updating) renderUpdateSteps(status.updatePhase);
+    return;
+  }
   const setup = ['needs_profile', 'needs_provision', 'provisioning', 'ready_to_open', 'enrolling'].includes(status.state);
   document.getElementById('heading').textContent = setup ? 'Preparar esta caja' : 'Preparando tu punto de venta…';
   document.getElementById('setupDescription').hidden = !setup;
@@ -95,6 +141,10 @@ importBundle.addEventListener('click', async () => {
 });
 
 openPos.addEventListener('click', () => window.terrones.runtime.openPos());
+continueAfterUpdate.addEventListener('click', async () => {
+  continueAfterUpdate.disabled = true;
+  try { await window.terrones.runtime.retry(); } finally { continueAfterUpdate.disabled = false; }
+});
 retry.addEventListener('click', async () => { retry.disabled = true; try { await window.terrones.runtime.retry(); } finally { retry.disabled = false; } });
 diagnostics.addEventListener('click', async () => {
   output.style.display = 'block';
