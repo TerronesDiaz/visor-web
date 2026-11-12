@@ -1,4 +1,4 @@
-const { app, BrowserWindow, WebContentsView, clipboard, dialog, ipcMain, nativeImage, shell } = require("electron");
+const { app, BrowserWindow, WebContentsView, clipboard, dialog, ipcMain, nativeImage, powerMonitor, shell } = require("electron");
 const winston = require("winston");
 const fs = require("fs");
 const { spawn } = require("child_process");
@@ -28,6 +28,11 @@ let statusWindow = null;
 let bootPromise = null;
 let importPromise = null;
 let updateInstallPending = false;
+// Automatic releases: the prompt on screen, and the release the cashier postponed.
+let autoPromptWindow = null;
+let autoPrompt = null;
+let autoSnoozedKey = null;
+let autoCheckTimer = null;
 let profileOperationPending = false;
 let pendingRuntime = null;
 let posWindow = null;
@@ -298,8 +303,10 @@ function createStatusWindow() {
     return statusWindow;
   }
   statusWindow = new BrowserWindow({
-    width: 620,
-    height: 600,
+    width: 820,
+    height: 720,
+    minWidth: 560,
+    minHeight: 480,
     resizable: true,
     autoHideMenuBar: true,
     parent: posWindow && !posWindow.isDestroyed() ? posWindow : undefined,
@@ -354,7 +361,16 @@ async function bootLocalFirst() {
         });
         return;
       }
-      await prepareLocalSession(result, false);
+      // Nobody is selling yet: the best moment for a release published as automatic.
+      const automatic = await installAutomaticUpdateAtStartup();
+      if (automatic === 'closing' || quitting) return;
+      let runtime = result;
+      if (automatic === 'installed') {
+        sendRuntimeStatus({ state: 'starting', phase: 'bootstrap', message: 'Preparando tu punto de venta…' });
+        runtime = await localRuntime.ensureLocalRuntime(sendRuntimeStatus);
+        if (quitting) return;
+      }
+      await prepareLocalSession(runtime, false);
     } catch (error) {
       logger.error(`Error iniciando runtime local: ${error.stack || error.message}`);
       showRuntimeError(error.message);
@@ -406,6 +422,7 @@ async function openPreparedPos() {
     message: 'POS local listo',
     sync: localRuntime.readSyncStatus(),
   });
+  startAutomaticUpdateChecks();
   return { ok: true };
 }
 
@@ -424,6 +441,46 @@ ipcMain.handle('runtime:status', () => {
 ipcMain.handle('runtime:diagnostics', () => {
   const activeProfileId = profileStore.getActiveProfileId();
   return activeProfileId ? localRuntime.diagnostics(activeProfileId) : { profiles: [], message: 'No hay una tienda instalada.' };
+});
+
+// What the status window shows besides sync and updates: is the POS answering, is there
+// a printer, and when was the last backup.
+function supportLogDirectories() {
+  return { visor: logDirectory, pos: path.join(updateRuntime.pathsFor().root, 'logs') };
+}
+ipcMain.handle('support:summary', async () => {
+  const activeProfileId = profileStore.getActiveProfileId();
+  let printing;
+  try {
+    const health = await printServiceHealth();
+    printing = { running: true, printerConfigured: Boolean(health.printerConfigured), printer: health.printer || '', error: health.printerError || '' };
+  } catch (error) {
+    printing = { running: false, printerConfigured: false, printer: '', error: error.message };
+  }
+  let backup = null;
+  try { backup = activeProfileId ? localRuntime.latestBackup(activeProfileId) : null; } catch (_) { backup = null; }
+  return {
+    posReady: await localRuntime.localHealth(),
+    posShown: Boolean(mainWindow) && !mainWindow.isPreparing(),
+    printing,
+    backup,
+    updaterFeatures: updateRuntime.updaterFeatures(),
+    logs: supportLogDirectories(),
+  };
+});
+ipcMain.handle('support:copy-diagnostics', async () => {
+  const activeProfileId = profileStore.getActiveProfileId();
+  const diagnostics = activeProfileId ? await localRuntime.diagnostics(activeProfileId) : { message: 'No hay una tienda instalada.' };
+  const updates = updateRuntime.getStatus(app.getVersion());
+  clipboard.writeText(JSON.stringify({ generatedAt: new Date().toISOString(), visor: app.getVersion(), updates, diagnostics }, null, 2));
+  return true;
+});
+ipcMain.handle('support:open-logs', async (_event, which) => {
+  const directory = supportLogDirectories()[which === 'visor' ? 'visor' : 'pos'];
+  if (!fs.existsSync(directory)) throw new Error('Todavía no hay registros en esa carpeta.');
+  const failure = await shell.openPath(directory);
+  if (failure) throw new Error(failure);
+  return true;
 });
 ipcMain.handle('profiles:list', () => ({
   activeProfileId: profileStore.getActiveProfileId(),
@@ -582,13 +639,17 @@ function closeForUpdate(activity, reason) {
 
 // The POS stays covered while the updater works, so nobody sells against a database
 // being backed up or migrated, and the visor starts nothing in Docker meanwhile.
-// Resolves with the final activity, or null when the visor closes for its own step.
-async function waitForUpdate() {
-  createStartupWindow(false);
+// A light update (no new migrations) touches no database: the POS stays open while the
+// release loads and is covered only when the updater is about to restart it.
+// Resolves with the final activity (covered says whether the POS was ever hidden), or
+// null when the visor closes for its own step.
+async function waitForUpdate({ expectLight = false } = {}) {
+  let covered = false;
+  const posShowing = Boolean(mainWindow) && !mainWindow.isPreparing();
   for (;;) {
     if (quitting) return null;
     const activity = updateRuntime.updateActivity();
-    if (!activity.active) return activity;
+    if (!activity.active) return { ...activity, covered };
     if (!activity.request?.visorOpen) {
       closeForUpdate(activity, 'Actualización en curso con un actualizador que espera el cierre del visor; cerrando.');
       return null;
@@ -597,13 +658,24 @@ async function waitForUpdate() {
       closeForUpdate(activity, 'El actualizador va a instalar el visor; cerrando.');
       return null;
     }
-    sendRuntimeStatus({
-      state: 'updating',
-      phase: 'update',
-      updatePhase: activity.progress?.phase || 'prepare',
-      message: activity.progress?.message || 'Preparando la actualización…',
-      version: activity.request?.posVersion || activity.request?.visorVersion || '',
-    });
+    // Until the updater says which kind it is, trust what the visor predicted.
+    const light = activity.light === null ? expectLight : activity.light;
+    const restarting = ['start', 'verify'].includes(activity.progress?.phase);
+    if (!covered && !(posShowing && light && !restarting)) {
+      createStartupWindow(false);
+      covered = true;
+    }
+    if (covered) {
+      sendRuntimeStatus({
+        state: 'updating',
+        phase: 'update',
+        updatePhase: activity.progress?.phase || 'prepare',
+        message: activity.progress?.message || 'Preparando la actualización…',
+        version: activity.request?.posVersion || activity.request?.visorVersion || '',
+        // A light update has no backup step to show.
+        light: activity.light === true,
+      });
+    }
     await new Promise((resolve) => setTimeout(resolve, 1500));
   }
 }
@@ -612,21 +684,239 @@ function assertNoUpdateRunning() {
   if (updateRuntime.updateActivity().active) throw new Error('Hay una actualización en curso; espera a que termine.');
 }
 
-async function followUpdateInWindow() {
-  const finished = await waitForUpdate();
+async function followUpdateInWindow(options = {}) {
+  const finished = await waitForUpdate(options);
   if (!finished) return;
   updateInstallPending = false;
   if (finished.progress?.phase === 'failed') {
+    const message = finished.progress.message || 'La actualización no se completó.';
+    if (!finished.covered) {
+      // A light update that failed before restarting the POS never interrupted the sale.
+      logger.warn(`Actualización ligera sin completar: ${message} ${finished.progress.error || ''}`);
+      dialog.showMessageBox(posWindow || undefined, {
+        type: 'warning', buttons: ['Entendido'], title: 'Actualización', message,
+        detail: [finished.progress.error, 'Terrones POS sigue con la versión anterior. Puedes revisar el detalle con F9.'].filter(Boolean).join('\n\n'),
+      }).catch(() => {});
+      return;
+    }
     sendRuntimeStatus({
       state: 'update_failed',
       phase: 'update',
-      message: finished.progress.message || 'La actualización no se completó.',
+      message,
       error: finished.progress.error || '',
     });
     return;
   }
+  // Reloads the POS so the page comes from the version that was just installed.
   await bootLocalFirst();
 }
+
+// Shared by the Install button and by automatic releases. Refuses before asking or
+// closing anything, so the POS is never interrupted for an update that cannot run.
+async function startInstall({ automatic = false } = {}) {
+  if (updateInstallPending) throw new Error('Ya se está solicitando una actualización.');
+  updateInstallPending = true;
+  try {
+    const check = await updateRuntime.preflight({ visorVersion: app.getVersion(), checkDatabase: checkActiveDatabase });
+    if (!check.ok) throw new Error(check.problems.join(' '));
+    // An updater registered before 2026.11.01.4 waits for the visor to exit first.
+    const visorOpen = updateRuntime.updaterFeatures().includes('visor-abierto');
+    const light = visorOpen && check.status.light;
+    if (!automatic) {
+      const modalVisible = await posSaleInProgress({ modalOnly: true });
+      const visorStep = check.status.available.visor
+        ? ' Al final el visor se cerrará un momento para actualizarse y se abrirá solo.'
+        : '';
+      const confirmation = await dialog.showMessageBox(statusWindow || undefined, {
+        type: modalVisible ? 'warning' : 'question',
+        buttons: [visorOpen ? 'Instalar actualización' : 'Instalar y cerrar el POS', 'Cancelar'],
+        defaultId: 1,
+        cancelId: 1,
+        title: 'Instalar actualización',
+        message: modalVisible
+          ? 'Hay una ventana de cobro abierta.'
+          : (light
+            ? 'Terrones POS se reiniciará unos segundos al final.'
+            : (visorOpen ? 'Terrones POS no se podrá usar durante la actualización.' : 'La actualización cerrará Terrones POS durante unos minutos.')),
+        detail: (light
+          ? 'Esta versión no cambia la base de datos: puedes seguir vendiendo mientras se prepara. Al final el POS se reinicia unos segundos; termina o cancela el cobro que tengas abierto cuando aparezca el aviso.'
+          : 'Cancela cualquier cobro o abono en curso y confirma que no hay una venta editándose antes de continuar.\n\n'
+            + (visorOpen
+              ? 'Esta ventana mostrará el avance (de 5 a 10 minutos) y el POS volverá solo al terminar.'
+              : 'Una ventana mostrará el avance (de 5 a 10 minutos). Terrones POS se abrirá solo al terminar.'))
+          + visorStep,
+      });
+      if (confirmation.response !== 0) {
+        updateInstallPending = false;
+        return { canceled: true };
+      }
+    }
+    const requestedAt = new Date().toISOString();
+    const result = await updateRuntime.requestInstall({
+      visorVersion: app.getVersion(), visorExecutable: process.execPath, visorOpen, checkDatabase: checkActiveDatabase,
+    });
+    if (automatic) updateRuntime.recordAutoAttempt(check.status.key);
+    logger.info(`Actualización ${automatic ? 'automática' : 'manual'} solicitada (${check.status.key}); ${light ? 'ligera' : 'completa'}.`);
+    return { ...result, visorOpen, light, requestedAt, version: check.status.available.pos || check.status.available.visor };
+  } catch (error) {
+    updateInstallPending = false;
+    throw error;
+  }
+}
+
+// Whether somebody is in the middle of a sale: a dialog open in the POS, or products
+// in the cart. A page that does not answer in time counts as busy, so an automatic
+// release never interrupts a sale; a cart that cannot be read (nobody signed in, POS
+// not answering) means there is no sale to interrupt.
+async function posSaleInProgress({ modalOnly = false } = {}) {
+  if (!mainWindow || mainWindow.contents.isDestroyed() || mainWindow.isPreparing()) return false;
+  const script = `(async () => {
+    if (document.querySelector('.modal.show,[role=dialog][open],.swal2-container')) return true;
+    if (${modalOnly ? 'true' : 'false'}) return false;
+    try {
+      const response = await fetch('/vender/obtenerCarrito.php', { credentials: 'same-origin', cache: 'no-store' });
+      if (!response.ok) return false;
+      const data = await response.json();
+      return Boolean(data && !data.error && data.carrito && Array.isArray(data.carrito.productos) && data.carrito.productos.length);
+    } catch (_) { return false; }
+  })()`;
+  try {
+    return await Promise.race([
+      mainWindow.contents.executeJavaScript(script, true),
+      new Promise((resolve) => setTimeout(() => resolve(!modalOnly), 4000)),
+    ]);
+  } catch (_) {
+    return !modalOnly;
+  }
+}
+
+// Runs the request that startInstall accepted: closes the visor for an old updater, or
+// follows the update in this window.
+function continueInstall(result) {
+  if (!result.visorOpen) {
+    showUpdateProgress(result.version, result.requestedAt);
+    logger.info('Actualización verificada solicitada; cerrando el visor.');
+    setTimeout(() => app.quit(), 500);
+    return;
+  }
+  if (statusWindow && !statusWindow.isDestroyed()) statusWindow.close();
+  followUpdateInWindow({ expectLight: result.light }).catch((error) => {
+    updateInstallPending = false;
+    showRuntimeError(error.message);
+  });
+}
+
+// 'continue' opens the POS as usual, 'installed' means the containers were replaced and
+// 'closing' means the visor is quitting so the updater can work.
+async function installAutomaticUpdateAtStartup() {
+  let key = null;
+  try {
+    const status = updateRuntime.getStatus(app.getVersion());
+    if (!updateRuntime.autoInstallDecision(status, { atStartup: true, snoozedKey: autoSnoozedKey }).install) return 'continue';
+    key = status.key;
+    const result = await startInstall({ automatic: true });
+    if (!result.visorOpen) {
+      showUpdateProgress(result.version, result.requestedAt);
+      setTimeout(() => app.quit(), 500);
+      return 'closing';
+    }
+    const finished = await waitForUpdate();
+    updateInstallPending = false;
+    if (!finished) return 'closing';
+    if (finished.progress?.phase === 'failed') {
+      logger.warn(`La actualización automática no se completó: ${finished.progress.message || ''} ${finished.progress.error || ''}`);
+    }
+    return 'installed';
+  } catch (error) {
+    // The release stays available in F9; opening the store matters more than updating.
+    updateInstallPending = false;
+    autoSnoozedKey = key || autoSnoozedKey;
+    logger.warn(`No se instaló la actualización automática al abrir: ${error.message}`);
+    return 'continue';
+  }
+}
+
+function closeAutoPrompt() {
+  const window = autoPromptWindow;
+  autoPromptWindow = null;
+  autoPrompt = null;
+  if (window && !window.isDestroyed()) window.close();
+}
+
+function showAutoUpdatePrompt(status) {
+  autoPrompt = {
+    key: status.key,
+    seconds: 60,
+    version: [status.available.pos ? `Terrones POS ${status.available.pos}` : '', status.available.visor ? `visor ${status.available.visor}` : ''].filter(Boolean).join(' y '),
+    notes: status.notes || '',
+    light: Boolean(status.light) && updateRuntime.updaterFeatures().includes('visor-abierto'),
+    visor: Boolean(status.available.visor),
+  };
+  autoPromptWindow = new BrowserWindow({
+    width: 520, height: 400, resizable: false, minimizable: false, maximizable: false,
+    autoHideMenuBar: true, title: 'Actualización automática',
+    parent: posWindow && !posWindow.isDestroyed() ? posWindow : undefined, modal: true,
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, preload: path.join(__dirname, 'preload.js') },
+  });
+  const window = autoPromptWindow;
+  window.loadFile(path.join(__dirname, 'vistas', 'auto-update.html'));
+  // Closing the prompt without answering postpones the release.
+  window.on('closed', () => {
+    if (autoPromptWindow !== window) return;
+    autoSnoozedKey = autoPrompt?.key || autoSnoozedKey;
+    autoPromptWindow = null;
+    autoPrompt = null;
+  });
+}
+
+// With the POS open, an automatic release waits until nobody is using the box.
+async function checkAutomaticUpdate() {
+  if (quitting || bootPromise || updateInstallPending || autoPromptWindow || profileOperationPending) return;
+  if (!mainWindow || mainWindow.isPreparing()) return;
+  const status = updateRuntime.getStatus(app.getVersion());
+  const decision = updateRuntime.autoInstallDecision(status, { snoozedKey: autoSnoozedKey, idleSeconds: powerMonitor.getSystemIdleTime() });
+  if (!decision.install) return;
+  if (await posSaleInProgress()) return;
+  if (quitting || updateInstallPending || autoPromptWindow) return;
+  logger.info(`Actualización automática lista (${status.key}); mostrando el aviso.`);
+  showAutoUpdatePrompt(status);
+}
+
+function startAutomaticUpdateChecks() {
+  if (autoCheckTimer) return;
+  autoCheckTimer = setInterval(() => {
+    checkAutomaticUpdate().catch((error) => logger.warn(`Revisión de actualización automática: ${error.message}`));
+  }, 30000);
+}
+
+ipcMain.handle('update:auto-info', (event) => {
+  if (!autoPromptWindow || event.sender !== autoPromptWindow.webContents || !autoPrompt) throw new Error('No hay una actualización automática pendiente.');
+  return autoPrompt;
+});
+ipcMain.handle('update:auto-respond', async (event, answer) => {
+  if (!autoPromptWindow || event.sender !== autoPromptWindow.webContents || !autoPrompt) throw new Error('No hay una actualización automática pendiente.');
+  const { key } = autoPrompt;
+  if (answer !== 'install') {
+    autoSnoozedKey = key;
+    logger.info(`Actualización automática pospuesta (${key}) hasta volver a abrir Terrones POS.`);
+    closeAutoPrompt();
+    return { postponed: true };
+  }
+  closeAutoPrompt();
+  // Somebody may have come back during the countdown.
+  if (await posSaleInProgress()) {
+    logger.info('Actualización automática detenida: hay una venta en curso.');
+    return { postponed: true };
+  }
+  try {
+    continueInstall(await startInstall({ automatic: true }));
+    return { ok: true };
+  } catch (error) {
+    logger.warn(`No se instaló la actualización automática: ${error.message}`);
+    autoSnoozedKey = key;
+    return { ok: false, error: error.message };
+  }
+});
 
 ipcMain.handle('update:check', () => updateRuntime.getStatus(app.getVersion()));
 ipcMain.handle('update:open-log', async () => {
@@ -642,60 +932,11 @@ ipcMain.handle('update:open-log', async () => {
 ipcMain.handle('update:install', async (event) => {
   const senderUrl = event.senderFrame?.url || '';
   if (!senderUrl.endsWith('/vistas/status.html')) throw new Error('La actualización solo puede iniciarse desde la ventana de estado.');
-  if (updateInstallPending) throw new Error('Ya se está solicitando una actualización.');
-  updateInstallPending = true;
-  try {
-    // Refuse before asking, so the POS is never closed for an update that cannot run.
-    const check = await updateRuntime.preflight({ visorVersion: app.getVersion(), checkDatabase: checkActiveDatabase });
-    if (!check.ok) throw new Error(check.problems.join(' '));
-    let modalVisible = false;
-    if (posWindow && !posWindow.isDestroyed()) {
-      modalVisible = await mainWindow.contents.executeJavaScript("Boolean(document.querySelector('.modal.show,[role=dialog][open]'))", true).catch(() => false);
-    }
-    // An updater registered before this version waits for the visor to exit first.
-    const visorOpen = updateRuntime.updaterFeatures().includes('visor-abierto');
-    const visorStep = check.status.available.visor
-      ? ' Al final el visor se cerrará un momento para actualizarse y se abrirá solo.'
-      : '';
-    const confirmation = await dialog.showMessageBox(statusWindow || undefined, {
-      type: modalVisible ? 'warning' : 'question',
-      buttons: [visorOpen ? 'Instalar actualización' : 'Instalar y cerrar el POS', 'Cancelar'],
-      defaultId: 1,
-      cancelId: 1,
-      title: 'Instalar actualización',
-      message: modalVisible
-        ? 'Hay una ventana de cobro abierta.'
-        : (visorOpen ? 'Terrones POS no se podrá usar durante la actualización.' : 'La actualización cerrará Terrones POS durante unos minutos.'),
-      detail: 'Cancela cualquier cobro o abono en curso y confirma que no hay una venta editándose antes de continuar.\n\n'
-        + (visorOpen
-          ? `Esta ventana mostrará el avance (de 5 a 10 minutos) y el POS volverá solo al terminar.${visorStep}`
-          : 'Una ventana mostrará el avance (de 5 a 10 minutos). Terrones POS se abrirá solo al terminar.'),
-    });
-    if (confirmation.response !== 0) {
-      updateInstallPending = false;
-      return { canceled: true };
-    }
-    const requestedAt = new Date().toISOString();
-    const result = await updateRuntime.requestInstall({
-      visorVersion: app.getVersion(), visorExecutable: process.execPath, visorOpen, checkDatabase: checkActiveDatabase,
-    });
-    if (!visorOpen) {
-      showUpdateProgress(check.status.available.pos || check.status.available.visor, requestedAt);
-      logger.info('Actualización verificada solicitada; cerrando el visor.');
-      setTimeout(() => app.quit(), 500);
-      return result;
-    }
-    logger.info('Actualización verificada solicitada; el visor muestra el avance.');
-    if (statusWindow && !statusWindow.isDestroyed()) statusWindow.close();
-    followUpdateInWindow().catch((error) => {
-      updateInstallPending = false;
-      showRuntimeError(error.message);
-    });
-    return result;
-  } catch (error) {
-    updateInstallPending = false;
-    throw error;
-  }
+  if (autoPromptWindow) closeAutoPrompt();
+  const result = await startInstall();
+  if (result.canceled) return result;
+  continueInstall(result);
+  return { ok: true, triggered: result.triggered };
 });
 
 if (primaryInstance) app.whenReady().then(async () => {

@@ -25,6 +25,10 @@ const HISTORY_LIMIT = 20;
 const STALE_INSTALL_MS = 15 * 60 * 1000;
 // The task runs every minute; a request nobody picks up in this time will not be picked up.
 const UNCLAIMED_REQUEST_MS = 5 * 60 * 1000;
+// An automatic release installs with the POS open only after the box has been unused this long.
+const AUTO_IDLE_SECONDS = 120;
+// A release that keeps coming back as available must not restart the box forever.
+const AUTO_MAX_ATTEMPTS = 2;
 
 function rootPath() {
   return process.env.TERRONES_POS_HOME || path.join(process.env.ProgramData || 'C:\\ProgramData', 'TerronesPOS');
@@ -41,6 +45,7 @@ function pathsFor(root = rootPath()) {
     installProgress: path.join(root, 'state', 'update-progress.json'),
     history: path.join(root, 'state', 'update-history.json'),
     lock: path.join(root, 'updates', 'install.lock'),
+    auto: path.join(root, 'state', 'update-auto.json'),
     capabilities: path.join(root, 'updater', 'capabilities.json'),
     publicKey: path.join(__dirname, 'update-public-key.xml'),
   };
@@ -103,6 +108,49 @@ function compareVersions(left, right) {
     return String(av).localeCompare(String(bv), 'en', { numeric: true });
   }
   return 0;
+}
+
+// The publisher marks a release as automatic in its signed manifest (install.mode = "auto").
+// Anything else, including a manifest signed before the field existed, waits for the button.
+function installMode(manifest) {
+  return manifest?.install?.mode === 'auto' ? 'auto' : 'manual';
+}
+
+// Same rule as Test-LightUpdate in Invoke-TerronesUpdate.ps1: a release whose migrations
+// are all applied does not touch the database, so the POS keeps selling while it installs.
+function hasNewMigrations(manifest, installed) {
+  const names = (list) => (Array.isArray(list) ? list.map((name) => String(name || '')).filter(Boolean) : []);
+  const known = names(installed?.requiredMigrations);
+  const required = names(manifest?.requiredMigrations);
+  if (!installed?.version || !Array.isArray(manifest?.requiredMigrations) || !known.length || !required.length) return true;
+  return required.some((name) => !known.includes(name));
+}
+
+function updateKey(available) {
+  return `${available?.pos || ''}|${available?.visor || ''}`;
+}
+
+function autoAttempts(paths, key) {
+  const state = readJson(paths.auto, null);
+  return state?.key === key ? Number(state.attempts || 0) : 0;
+}
+
+function recordAutoAttempt(key, root = rootPath()) {
+  const paths = pathsFor(root);
+  const attempts = autoAttempts(paths, key) + 1;
+  try { writeJsonAtomic(paths.auto, { schema: 1, key, attempts, lastAt: new Date().toISOString() }); } catch (_) { /* best effort */ }
+  return attempts;
+}
+
+// Whether an automatic release may start by itself right now. The caller still checks
+// that no sale is in progress; this only decides from what the box already knows.
+function autoInstallDecision(status, { snoozedKey = null, idleSeconds = null, atStartup = false } = {}) {
+  if (!status?.canInstall) return { install: false, reason: 'nothing' };
+  if (status.mode !== 'auto') return { install: false, reason: 'manual' };
+  if (status.auto?.blocked) return { install: false, reason: status.auto.blocked };
+  if (snoozedKey && snoozedKey === status.key) return { install: false, reason: 'snoozed' };
+  if (!atStartup && !(Number(idleSeconds) >= AUTO_IDLE_SECONDS)) return { install: false, reason: 'in-use' };
+  return { install: true, reason: atStartup ? 'startup' : 'idle' };
 }
 
 function readInstallProgress(paths) {
@@ -174,15 +222,20 @@ function updateActivity(root = rootPath(), now = Date.now()) {
   const requestedAt = Date.parse(request?.requestedAt || '');
   const latest = readInstallProgress(paths);
   const progress = latest && Number.isFinite(requestedAt) && (Date.parse(latest.updatedAt || '') || 0) < requestedAt - 5000 ? null : latest;
-  if (lockHeld(paths)) return { active: true, stale: false, request, progress };
-  if (!request) return { active: false, stale: false, request: null, progress };
+  const installStatus = readJson(paths.installStatus, {}) || {};
+  // true/false once the updater decided for this request; null while it has not said.
+  const reported = installStatus.state === 'installing' && typeof installStatus.light === 'boolean'
+    && (!Number.isFinite(requestedAt) || (Date.parse(installStatus.updatedAt || '') || 0) >= requestedAt - 5000);
+  const light = reported ? installStatus.light : null;
+  if (lockHeld(paths)) return { active: true, stale: false, request, progress, light };
+  if (!request) return { active: false, stale: false, request: null, progress, light };
   const lastSignal = Math.max(
     modifiedAt(paths.request),
     Date.parse(progress?.updatedAt || '') || 0,
-    Date.parse(readJson(paths.installStatus, {})?.updatedAt || '') || 0,
+    Date.parse(installStatus.updatedAt || '') || 0,
   );
   const waiting = now - lastSignal < UNCLAIMED_REQUEST_MS;
-  return { active: waiting, stale: !waiting, request, progress };
+  return { active: waiting, stale: !waiting, request, progress, light };
 }
 
 function getStatus(visorVersion, root = rootPath(), publicKeyFile = path.join(__dirname, 'update-public-key.xml')) {
@@ -207,6 +260,20 @@ function getStatus(visorVersion, root = rootPath(), publicKeyFile = path.join(__
   const ready = posAvailable || visorAvailable;
   const installing = install?.state === 'installing';
   const failed = install?.state === 'error';
+  const available = {
+    pos: posAvailable ? posFeed.manifest.version : null,
+    visor: visorAvailable ? visorFeed.manifest.version : null,
+  };
+  const key = updateKey(available);
+  // Automatic only when every pending package was published as automatic.
+  const modes = [posAvailable ? installMode(posFeed.manifest) : null, visorAvailable ? installMode(visorFeed.manifest) : null].filter(Boolean);
+  const mode = modes.length ? (modes.every((value) => value === 'auto') ? 'auto' : 'manual') : null;
+  const light = posAvailable && updaterFeatures(root).includes('ligera') && !hasNewMigrations(posFeed.manifest, installed);
+  const lastAttempt = history[0] || null;
+  const attempts = ready ? autoAttempts(paths, key) : 0;
+  // A release that already failed here, or that was tried twice, waits for a person.
+  const failedBefore = ready && lastAttempt?.state === 'error' && [available.pos, available.visor].includes(lastAttempt.version);
+  const blocked = mode !== 'auto' ? null : (failedBefore ? 'failed' : (attempts >= AUTO_MAX_ATTEMPTS ? 'attempts' : null));
   const state = installing ? 'installing' : (failed ? 'error' : (ready ? 'ready' : (install?.state || download.state)));
   const message = installing
     ? install.message
@@ -217,11 +284,15 @@ function getStatus(visorVersion, root = rootPath(), publicKeyFile = path.join(__
     state,
     message,
     error: install?.error || '',
-    installed: { pos: installed.version || 'Sin registro', visor: visorVersion },
-    available: {
-      pos: posAvailable ? posFeed.manifest.version : null,
-      visor: visorAvailable ? visorFeed.manifest.version : null,
-    },
+    installed: { pos: installed.version || 'Sin registro', visor: visorVersion, installedAt: installed.installedAt || null },
+    available,
+    key,
+    // 'auto' | 'manual' while something is pending, null otherwise.
+    mode,
+    // The POS part can install without stopping the sale for more than a few seconds.
+    light,
+    auto: { attempts, blocked },
+    publishedAt: (posAvailable && posFeed.manifest.publishedAt) || (visorAvailable && visorFeed.manifest.publishedAt) || null,
     notes: [posAvailable ? posFeed.manifest.notes : '', visorAvailable ? visorFeed.manifest.notes : ''].filter(Boolean).join('\n\n'),
     canInstall: ready && !installing,
     checkedAt: download.updatedAt || null,
@@ -229,8 +300,9 @@ function getStatus(visorVersion, root = rootPath(), publicKeyFile = path.join(__
       downloadedBytes: Number(download.downloadedBytes || 0),
       totalBytes: Number(download.totalBytes || 0),
     },
-    install: installing ? installProgress : null,
-    lastAttempt: history[0] || null,
+    install: installing && installProgress ? { ...installProgress, light: install.light === true } : null,
+    lastAttempt,
+    history,
     packageBytes: (posAvailable ? Number(posFeed.manifest.package.size || 0) : 0)
       + (visorAvailable ? Number(visorFeed.manifest.package.size || 0) : 0),
   };
@@ -309,6 +381,7 @@ async function requestInstall({ visorVersion, visorExecutable, visorOpen = false
 }
 
 module.exports = {
-  INSTALL_PHASES, compareVersions, getStatus, pathsFor, preflight, publicKeyFromXml, readVerifiedFeed, requestInstall,
+  AUTO_IDLE_SECONDS, AUTO_MAX_ATTEMPTS, INSTALL_PHASES, autoInstallDecision, compareVersions, getStatus, hasNewMigrations,
+  installMode, pathsFor, preflight, publicKeyFromXml, readVerifiedFeed, recordAutoAttempt, requestInstall,
   updateActivity, updaterFeatures,
 };

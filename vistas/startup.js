@@ -32,9 +32,11 @@ const updatePhases = [
   ['verify', 'Comprobar que todo funcione'],
 ];
 
-function renderUpdateSteps(current) {
-  const index = updatePhases.findIndex(([id]) => id === current);
-  updateSteps.replaceChildren(...updatePhases.map(([, label], position) => {
+function renderUpdateSteps(current, light) {
+  // A light update does not back up: it touches no database.
+  const phases = light ? updatePhases.filter(([id]) => id !== 'backup') : updatePhases;
+  const index = phases.findIndex(([id]) => id === current);
+  updateSteps.replaceChildren(...phases.map(([, label], position) => {
     const item = document.createElement('li');
     item.className = 'step';
     item.classList.toggle('active', position === index);
@@ -74,7 +76,7 @@ function render(status) {
     detail.textContent = updateFailed ? [status.error, 'Terrones POS sigue con la versión anterior.'].filter(Boolean).join(' ') : '';
     statusBox.classList.toggle('error', updateFailed);
     statusBox.classList.remove('ready');
-    if (updating) renderUpdateSteps(status.updatePhase);
+    if (updating) renderUpdateSteps(status.updatePhase, status.light === true);
     return;
   }
   const setup = ['needs_profile', 'needs_provision', 'provisioning', 'ready_to_open', 'enrolling'].includes(status.state);

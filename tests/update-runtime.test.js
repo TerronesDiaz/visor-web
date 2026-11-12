@@ -6,7 +6,8 @@ const path = require('node:path');
 const test = require('node:test');
 const { spawn } = require('node:child_process');
 const {
-  INSTALL_PHASES, compareVersions, getStatus, preflight, readVerifiedFeed, updateActivity, updaterFeatures,
+  AUTO_IDLE_SECONDS, AUTO_MAX_ATTEMPTS, INSTALL_PHASES, autoInstallDecision, compareVersions, getStatus, hasNewMigrations,
+  installMode, preflight, readVerifiedFeed, recordAutoAttempt, updateActivity, updaterFeatures,
 } = require('../update-runtime');
 
 // Holds the lock the way Invoke-TerronesUpdate.ps1 does: open, without sharing.
@@ -82,7 +83,7 @@ test('mantiene visible un error anterior aunque el paquete siga listo para reint
   }
 });
 
-function writeSignedPosFeed(root, { version = '2026.10.30.2' } = {}) {
+function writeSignedPosFeed(root, { version = '2026.10.30.2', extra = {}, current = { version: '2026.10.30.1' } } = {}) {
   const directory = path.join(root, 'updates', 'downloads', 'pos', 'current');
   fs.mkdirSync(directory, { recursive: true });
   const { privateKey, publicKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -93,15 +94,129 @@ function writeSignedPosFeed(root, { version = '2026.10.30.2' } = {}) {
   const packageName = 'TerronesPOS-flow.zip';
   const packageBytes = Buffer.from('paquete de prueba del flujo');
   const sha256 = crypto.createHash('sha256').update(packageBytes).digest('hex');
-  const manifest = Buffer.from(JSON.stringify({ schema: 1, channel: 'pos', version, package: { name: packageName, size: packageBytes.length, sha256 } }));
+  const manifest = Buffer.from(JSON.stringify({ schema: 1, channel: 'pos', version, ...extra, package: { name: packageName, size: packageBytes.length, sha256 } }));
   fs.writeFileSync(path.join(directory, packageName), packageBytes);
   fs.writeFileSync(path.join(directory, 'latest.json'), manifest);
   fs.writeFileSync(path.join(directory, 'latest.json.sig'), crypto.sign('RSA-SHA256', manifest, privateKey).toString('base64'));
   fs.writeFileSync(path.join(directory, '.verified.json'), JSON.stringify({ channel: 'pos', sha256 }));
-  fs.writeFileSync(path.join(root, 'updates', 'current.json'), JSON.stringify({ version: '2026.10.30.1' }));
+  fs.writeFileSync(path.join(root, 'updates', 'current.json'), JSON.stringify(current));
   fs.mkdirSync(path.join(root, 'state'), { recursive: true });
   return keyFile;
 }
+
+function withRoot(prefix, run) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  return Promise.resolve().then(() => run(root)).finally(() => fs.rmSync(root, { recursive: true, force: true }));
+}
+
+function writeUpdaterFeatures(root, features) {
+  fs.mkdirSync(path.join(root, 'updater'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'updater', 'capabilities.json'), JSON.stringify({ schema: 1, features }));
+}
+
+test('una versión es automática solo si su manifiesto firmado lo dice', () => withRoot('terrones-update-mode-', (root) => {
+  let keyFile = writeSignedPosFeed(root);
+  let status = getStatus('3.3.0', root, keyFile);
+  assert.equal(status.mode, 'manual', 'A manifest signed before the field existed waits for the button');
+  assert.equal(installMode({ install: { mode: 'siempre' } }), 'manual');
+
+  keyFile = writeSignedPosFeed(root, { extra: { install: { mode: 'auto' } } });
+  status = getStatus('3.3.0', root, keyFile);
+  assert.equal(status.mode, 'auto');
+  assert.equal(status.key, '2026.10.30.2|');
+  assert.equal(status.auto.blocked, null);
+
+  // Nothing pending: there is no mode to show.
+  keyFile = writeSignedPosFeed(root, { version: '2026.10.30.1', extra: { install: { mode: 'auto' } } });
+  status = getStatus('3.3.0', root, keyFile);
+  assert.equal(status.mode, null);
+  assert.equal(status.canInstall, false);
+}));
+
+test('una versión es ligera solo sin migraciones nuevas y con un actualizador que lo soporte', () => withRoot('terrones-update-light-', (root) => {
+  const applied = ['20260101000000_inicial', '20260202000000_segunda'];
+  const current = { version: '2026.10.30.1', requiredMigrations: applied };
+  let keyFile = writeSignedPosFeed(root, { extra: { requiredMigrations: applied }, current });
+  assert.equal(getStatus('3.3.0', root, keyFile).light, false, 'An updater that cannot do it stops the POS as before');
+
+  writeUpdaterFeatures(root, ['visor-abierto', 'recuperacion', 'ligera']);
+  assert.equal(getStatus('3.3.0', root, keyFile).light, true);
+
+  keyFile = writeSignedPosFeed(root, { extra: { requiredMigrations: [...applied, '20260303000000_nueva'] }, current });
+  assert.equal(getStatus('3.3.0', root, keyFile).light, false, 'A new migration needs the backup');
+
+  // Same conservative answers as Test-LightUpdate in the updater.
+  assert.equal(hasNewMigrations({ requiredMigrations: applied }, { version: '1', requiredMigrations: applied }), false);
+  assert.equal(hasNewMigrations({ requiredMigrations: applied }, { version: '1' }), true, 'A box without a recorded list is unknown');
+  assert.equal(hasNewMigrations({}, { version: '1', requiredMigrations: applied }), true, 'A manifest without a list is unknown');
+  assert.equal(hasNewMigrations({ requiredMigrations: [] }, { version: '1', requiredMigrations: applied }), true);
+  assert.equal(hasNewMigrations({ requiredMigrations: applied }, { requiredMigrations: applied }), true, 'No installed version on record');
+}));
+
+test('una versión automática se instala sola al abrir o con la caja sin uso, y no insiste', () => withRoot('terrones-update-auto-', (root) => {
+  const keyFile = writeSignedPosFeed(root, { extra: { install: { mode: 'auto' } } });
+  const status = getStatus('3.3.0', root, keyFile);
+  assert.deepEqual(autoInstallDecision(status, { atStartup: true }), { install: true, reason: 'startup' });
+  assert.equal(autoInstallDecision(status, { idleSeconds: AUTO_IDLE_SECONDS - 1 }).reason, 'in-use');
+  assert.equal(autoInstallDecision(status, {}).install, false, 'Unknown idle time is not idle');
+  assert.deepEqual(autoInstallDecision(status, { idleSeconds: AUTO_IDLE_SECONDS }), { install: true, reason: 'idle' });
+  assert.equal(autoInstallDecision(status, { idleSeconds: 9999, snoozedKey: status.key }).reason, 'snoozed');
+  assert.equal(autoInstallDecision(status, { atStartup: true, snoozedKey: 'otra|' }).install, true, 'Postponing one release does not postpone the next');
+
+  const manual = getStatus('3.3.0', root, writeSignedPosFeed(root));
+  assert.equal(autoInstallDecision(manual, { atStartup: true }).reason, 'manual');
+  assert.equal(autoInstallDecision({ canInstall: false }, { atStartup: true }).reason, 'nothing');
+}));
+
+test('una versión automática que ya falló o se intentó dos veces espera a una persona', () => withRoot('terrones-update-auto-block-', (root) => {
+  const keyFile = writeSignedPosFeed(root, { extra: { install: { mode: 'auto' } } });
+  const key = getStatus('3.3.0', root, keyFile).key;
+  assert.equal(recordAutoAttempt(key, root), 1);
+  assert.equal(getStatus('3.3.0', root, keyFile).auto.blocked, null);
+  assert.equal(recordAutoAttempt(key, root), AUTO_MAX_ATTEMPTS);
+  let status = getStatus('3.3.0', root, keyFile);
+  assert.equal(status.auto.blocked, 'attempts');
+  assert.equal(autoInstallDecision(status, { atStartup: true }).reason, 'attempts');
+  // Attempts are counted per release.
+  assert.equal(recordAutoAttempt('2026.12.01.1|', root), 1);
+  assert.equal(getStatus('3.3.0', root, keyFile).auto.blocked, null);
+
+  fs.writeFileSync(path.join(root, 'state', 'update-progress.json'), JSON.stringify({ phase: 'failed', version: '2026.10.30.2', updatedAt: '2026-11-11T05:00:00Z' }));
+  fs.writeFileSync(path.join(root, 'state', 'update-status.json'), JSON.stringify({ state: 'error', message: 'No se completó.', error: 'Detalle.', version: '', updatedAt: '2026-11-11T05:00:00Z' }));
+  status = getStatus('3.3.0', root, keyFile);
+  assert.equal(status.auto.blocked, 'failed');
+  assert.equal(status.canInstall, true, 'It can still be installed with the button');
+  assert.equal(autoInstallDecision(status, { atStartup: true }).install, false);
+}));
+
+test('el visor sabe si la actualización en curso es ligera solo cuando el actualizador lo dice', () => withRoot('terrones-update-light-activity-', (root) => {
+  fs.mkdirSync(path.join(root, 'updates'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'state'), { recursive: true });
+  const requestedAt = new Date().toISOString();
+  fs.writeFileSync(path.join(root, 'updates', 'request.json'), JSON.stringify({ posVersion: '2026.11.12.1', visorOpen: true, requestedAt }));
+  assert.equal(updateActivity(root).light, null, 'Nothing reported yet');
+
+  const write = (status) => fs.writeFileSync(path.join(root, 'state', 'update-status.json'), JSON.stringify(status));
+  write({ state: 'installing', light: null, updatedAt: new Date().toISOString() });
+  assert.equal(updateActivity(root).light, null, 'The updater has not looked at the manifest yet');
+  write({ state: 'installing', light: true, updatedAt: new Date().toISOString() });
+  assert.equal(updateActivity(root).light, true);
+  write({ state: 'installing', light: false, updatedAt: new Date().toISOString() });
+  assert.equal(updateActivity(root).light, false);
+  // What an earlier attempt left behind says nothing about this request.
+  write({ state: 'installing', light: true, updatedAt: '2026-10-01T00:00:00Z' });
+  assert.equal(updateActivity(root).light, null);
+}));
+
+test('las notas del visor indican el modo con una línea propia', () => {
+  const { installModeFromNotes } = require('../scripts/Sign-TerronesUpdateFeed');
+  assert.equal(installModeFromNotes('# visor-web 3.3.0\n\nPrimer párrafo.\n'), 'manual');
+  assert.equal(installModeFromNotes('# visor-web 3.3.0\r\n\r\nPrimer párrafo.\r\n\r\nInstalación: automática\r\n'), 'auto');
+  assert.throws(() => installModeFromNotes('Instalación: siempre'), /desconocido/);
+  for (const file of fs.readdirSync(path.join(__dirname, '..', 'docs', 'releases'))) {
+    assert.doesNotThrow(() => installModeFromNotes(fs.readFileSync(path.join(__dirname, '..', 'docs', 'releases', file), 'utf8')), file);
+  }
+});
 
 test('registra cada intento terminado una sola vez y conserva su registro', () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'terrones-update-history-'));
