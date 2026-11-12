@@ -186,6 +186,24 @@ async function switchProfile(profileId, report = () => {}, options = {}) {
   }
 }
 
+// Newest encrypted backup of a store, whichever tier wrote it.
+function latestBackup(profileId) {
+  const root = path.join(runtimePaths(profileId).root, 'backups');
+  let latest = null;
+  for (const tier of ['daily', 'weekly', 'monthly']) {
+    let names = [];
+    try { names = fs.readdirSync(path.join(root, tier)); } catch (_) { continue; }
+    for (const name of names) {
+      if (!name.endsWith('.age')) continue;
+      try {
+        const stat = fs.statSync(path.join(root, tier, name));
+        if (!latest || stat.mtimeMs > latest.time) latest = { time: stat.mtimeMs, tier, size: stat.size };
+      } catch (_) { /* removed by retention while listing */ }
+    }
+  }
+  return latest ? { at: new Date(latest.time).toISOString(), tier: latest.tier, size: latest.size } : null;
+}
+
 function listProfileStatus() {
   const activeId = profiles.getActiveProfileId(runtimeRoot());
   return profiles.listProfiles(runtimeRoot()).map((profile) => {
@@ -236,7 +254,7 @@ async function ensureLocalRuntime(report = () => {}) {
 }
 
 module.exports = {
-  LOCAL_URL, assertDatabaseRunning, diagnostics, ensureLocalRuntime, importProvision, listProfileStatus, localHealth,
+  LOCAL_URL, assertDatabaseRunning, diagnostics, ensureLocalRuntime, importProvision, latestBackup, listProfileStatus, localHealth,
   readProvisioningInfo, readSyncStatus, runBackup, runtimePaths, startApplication, stopApplication,
   startBackground, switchProfile, waitForApplication,
 };

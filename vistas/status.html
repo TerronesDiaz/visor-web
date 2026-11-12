@@ -7,90 +7,198 @@
   <style>
     :root { color-scheme:light; font-family:"Segoe UI",sans-serif; background:#0f172a; color:#e2e8f0; }
     * { box-sizing:border-box; }
-    body { margin:0; min-height:100vh; display:grid; place-items:center; padding:22px; }
-    main { width:min(570px,95vw); background:#1e293b; border:1px solid #334155; border-radius:20px; padding:28px; box-shadow:0 25px 70px #0007; }
-    h1 { margin:0 0 6px; font-size:27px; }
-    .subtitle { margin:0 0 22px; color:#94a3b8; }
-    .headline { display:flex; align-items:center; gap:12px; padding:16px; border-radius:13px; background:#0f172a; border:1px solid #334155; }
-    .dot { width:14px; height:14px; border-radius:50%; background:#64748b; box-shadow:0 0 0 7px #64748b22; }
-    .headline.synced .dot { background:#22c55e; box-shadow:0 0 0 7px #22c55e22; }
-    .headline.catching_up .dot,.headline.connecting .dot { background:#f59e0b; box-shadow:0 0 0 7px #f59e0b22; }
-    .headline.error .dot,.headline.offline .dot { background:#ef4444; box-shadow:0 0 0 7px #ef444422; }
-    #state { font-size:18px; }
-    #message { color:#94a3b8; font-size:13px; margin-top:3px; }
-    dl { display:grid; grid-template-columns:1fr auto; gap:0; margin:18px 0; background:#0f172a; border:1px solid #334155; border-radius:13px; overflow:hidden; }
-    dt,dd { margin:0; padding:13px 15px; border-bottom:1px solid #253349; }
-    dt { color:#94a3b8; } dd { text-align:right; font-weight:650; }
+    body { margin:0; min-height:100vh; padding:18px; }
+    main { width:min(760px,100%); margin:0 auto; background:#1e293b; border:1px solid #334155; border-radius:18px; padding:22px 24px; box-shadow:0 25px 70px #0007; }
+    header { display:flex; justify-content:space-between; align-items:flex-start; gap:12px; }
+    h1 { margin:0 0 4px; font-size:23px; }
+    h2 { margin:0 0 8px; font-size:16px; }
+    .subtitle { margin:0; color:#94a3b8; font-size:13px; }
+    .hint { color:#64748b; font-size:12px; white-space:nowrap; padding-top:6px; }
+    nav { display:flex; gap:4px; margin:16px 0 16px; border-bottom:1px solid #334155; }
+    nav button { background:none; color:#94a3b8; border:0; border-bottom:2px solid transparent; border-radius:0; padding:9px 12px; font-weight:600; font-size:14px; cursor:pointer; }
+    nav button:hover { color:#e2e8f0; }
+    nav button[aria-selected="true"] { color:#f8fafc; border-bottom-color:#3b82f6; }
+    nav button:focus-visible, button:focus-visible, select:focus-visible, input:focus-visible { outline:2px solid #60a5fa; outline-offset:2px; }
+    section[role="tabpanel"][hidden] { display:none; }
+    .tiles { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:10px; margin-bottom:14px; }
+    .tile { background:#0f172a; border:1px solid #334155; border-radius:12px; padding:11px 12px; min-width:0; }
+    .tile .label { color:#94a3b8; font-size:12px; display:flex; align-items:center; gap:7px; }
+    .tile .value { font-weight:650; font-size:15px; margin-top:4px; overflow-wrap:anywhere; }
+    .tile .detail { color:#94a3b8; font-size:12px; margin-top:2px; overflow-wrap:anywhere; }
+    .dot { width:9px; height:9px; border-radius:50%; background:#64748b; flex:none; }
+    .ok .dot { background:#22c55e; } .warn .dot { background:#f59e0b; } .bad .dot { background:#ef4444; }
+    .card { background:#0f172a; border:1px solid #334155; border-radius:12px; padding:14px 16px; margin-bottom:14px; }
+    .card p { margin:5px 0; color:#cbd5e1; font-size:14px; }
+    .card small, .muted { color:#94a3b8; font-size:12px; }
+    .badges { display:flex; flex-wrap:wrap; gap:6px; margin:2px 0 8px; }
+    .badge { font-size:12px; font-weight:600; padding:3px 9px; border-radius:999px; background:#334155; color:#e2e8f0; }
+    .badge.auto { background:#1d4ed8; color:#dbeafe; }
+    .badge.light { background:#166534; color:#dcfce7; }
+    .badge.full { background:#92400e; color:#fef3c7; }
+    dl { display:grid; grid-template-columns:1fr auto; margin:0; background:#0f172a; border:1px solid #334155; border-radius:12px; overflow:hidden; }
+    dt,dd { margin:0; padding:10px 14px; border-bottom:1px solid #253349; font-size:14px; }
+    dt { color:#94a3b8; } dd { text-align:right; font-weight:600; overflow-wrap:anywhere; }
     dt:last-of-type,dd:last-of-type { border-bottom:0; }
-    .actions { display:flex; flex-wrap:wrap; gap:10px; }
-    button { border:0; border-radius:10px; padding:11px 16px; font-weight:700; cursor:pointer; background:#2563eb; color:white; }
+    .actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+    button { border:0; border-radius:9px; padding:10px 14px; font-weight:700; cursor:pointer; background:#2563eb; color:white; font-size:14px; }
     button.secondary { background:#475569; }
-    pre { display:none; max-height:190px; overflow:auto; white-space:pre-wrap; word-break:break-word; background:#020617; padding:13px; border-radius:10px; color:#cbd5e1; font-size:11px; }
-    .update { margin:18px 0; padding:16px; border:1px solid #334155; border-radius:13px; background:#0f172a; }
-    .update h2 { margin:0 0 8px; font-size:17px; }
-    .update p { margin:5px 0; color:#cbd5e1; }
-    .update small { color:#94a3b8; }
-    #installUpdate[hidden],#openLog[hidden],#installPhases[hidden],#lastAttempt[hidden] { display:none; }
-    #installPhases { list-style:none; margin:10px 0; padding:0; }
-    #installPhases li { padding:3px 0; color:#64748b; }
+    button:disabled { opacity:.55; cursor:default; }
+    button[hidden], p[hidden], ol[hidden], progress[hidden], div[hidden] { display:none; }
+    pre { display:none; max-height:220px; overflow:auto; white-space:pre-wrap; word-break:break-word; background:#020617; padding:12px; border-radius:10px; color:#cbd5e1; font-size:11px; }
+    #installPhases { list-style:none; margin:8px 0; padding:0; font-size:14px; }
+    #installPhases li { padding:2px 0; color:#64748b; }
     #installPhases li.done { color:#4ade80; }
     #installPhases li.current { color:#f8fafc; font-weight:700; }
-    #lastAttempt.ok { color:#4ade80; }
-    #lastAttempt.failed { color:#f87171; }
-    .profiles { margin:18px 0; padding:16px; border:1px solid #334155; border-radius:13px; background:#0f172a; }
-    .profiles h2 { margin:0 0 10px; font-size:17px; }
+    table { width:100%; border-collapse:collapse; font-size:13px; }
+    th { text-align:left; color:#94a3b8; font-weight:600; padding:6px 8px; border-bottom:1px solid #334155; }
+    td { padding:7px 8px; border-bottom:1px solid #253349; vertical-align:top; }
+    tr:last-child td { border-bottom:0; }
+    td.ok { color:#4ade80; } td.failed { color:#f87171; }
+    kbd { display:inline-block; min-width:38px; text-align:center; background:#334155; border:1px solid #475569; border-bottom-width:2px; border-radius:6px; padding:2px 7px; font:600 12px "Segoe UI",sans-serif; color:#f8fafc; }
     .profile-row { display:grid; grid-template-columns:1fr auto; align-items:center; gap:10px; padding:9px 0; border-bottom:1px solid #253349; }
     .profile-row:last-child { border-bottom:0; }
     .profile-meta { color:#94a3b8; font-size:12px; }
     .enroll { display:grid; grid-template-columns:1fr 1fr auto; gap:8px; margin-top:12px; }
     select,input { width:100%; border:1px solid #475569; border-radius:9px; padding:10px; background:#020617; color:#e2e8f0; }
-    #profileMessage { color:#fbbf24; min-height:18px; }
+    #profileMessage, #supportMessage { color:#fbbf24; min-height:18px; font-size:13px; margin-top:8px; }
+    @media (max-width:620px) { .tiles { grid-template-columns:repeat(2,minmax(0,1fr)); } .enroll { grid-template-columns:1fr; } }
   </style>
 </head>
 <body>
   <main>
-    <h1>Estado de Terrones POS</h1>
-    <p class="subtitle">La caja local continúa operando aunque se pierda internet.</p>
-    <section class="headline" id="headline">
-      <span class="dot"></span>
-      <div><strong id="state">Comprobando…</strong><div id="message"></div></div>
-    </section>
-    <dl>
-      <dt>POS local</dt><dd id="local">Operativo</dd>
-      <dt>Última actualización</dt><dd id="updated">—</dd>
-      <dt>Atraso de réplica</dt><dd id="lag">—</dd>
-      <dt>Imágenes pendientes</dt><dd id="pending">—</dd>
-      <dt>Último error</dt><dd id="error">Ninguno</dd>
-      <dt>Versión en nube</dt><dd id="cloudVersion">—</dd>
-      <dt>Actualización en nube</dt><dd id="cloudUpdate">—</dd>
-    </dl>
-    <section class="profiles">
-      <h2>Tiendas</h2>
-      <div id="profileList">Cargando perfiles…</div>
-      <div class="enroll">
-        <select id="newProfile"></select>
-        <input id="enrollmentCode" autocomplete="one-time-code" placeholder="Código de enrolamiento">
-        <button id="enrollProfile">Agregar</button>
+    <header>
+      <div>
+        <h1>Estado de Terrones POS</h1>
+        <p class="subtitle" id="headerVersions">La caja local continúa operando aunque se pierda internet.</p>
       </div>
-      <div id="profileMessage"></div>
+      <span class="hint">F9 o Esc para cerrar</span>
+    </header>
+
+    <nav role="tablist" aria-label="Secciones">
+      <button role="tab" id="tab-resumen" aria-controls="panel-resumen" aria-selected="true">Resumen</button>
+      <button role="tab" id="tab-actualizaciones" aria-controls="panel-actualizaciones" aria-selected="false" tabindex="-1">Actualizaciones</button>
+      <button role="tab" id="tab-tiendas" aria-controls="panel-tiendas" aria-selected="false" tabindex="-1">Tiendas</button>
+      <button role="tab" id="tab-soporte" aria-controls="panel-soporte" aria-selected="false" tabindex="-1">Soporte</button>
+      <button role="tab" id="tab-atajos" aria-controls="panel-atajos" aria-selected="false" tabindex="-1">Atajos</button>
+    </nav>
+
+    <section role="tabpanel" id="panel-resumen" aria-labelledby="tab-resumen">
+      <div class="tiles">
+        <div class="tile" id="tilePos"><div class="label"><span class="dot"></span>Caja local</div><div class="value">Comprobando…</div><div class="detail"></div></div>
+        <div class="tile" id="tileCloud"><div class="label"><span class="dot"></span>Nube</div><div class="value">Comprobando…</div><div class="detail"></div></div>
+        <div class="tile" id="tilePrinter"><div class="label"><span class="dot"></span>Impresora</div><div class="value">Comprobando…</div><div class="detail"></div></div>
+        <div class="tile" id="tileBackup"><div class="label"><span class="dot"></span>Último respaldo</div><div class="value">Comprobando…</div><div class="detail"></div></div>
+      </div>
+      <div class="card" id="updateCard">
+        <h2 id="updateTitle">Actualizaciones</h2>
+        <div class="badges" id="updateBadges"></div>
+        <p id="updateState">Comprobando…</p>
+        <p id="updatePlan" hidden></p>
+        <progress id="updateProgress" value="0" max="100" hidden style="width:100%;margin-top:8px"></progress>
+        <ol id="installPhases" hidden></ol>
+        <p id="releaseNotes" class="muted"></p>
+        <p id="lastAttempt" hidden></p>
+        <div class="actions">
+          <button id="installUpdate" hidden>Instalar actualización</button>
+          <button class="secondary" id="openLog" hidden>Ver registro</button>
+          <button class="secondary" id="refresh">Buscar actualización</button>
+        </div>
+      </div>
+      <dl>
+        <dt>Sincronización</dt><dd id="syncState">—</dd>
+        <dt>Último contacto con la nube</dt><dd id="updated">—</dd>
+        <dt>Atraso de réplica</dt><dd id="lag">—</dd>
+        <dt>Imágenes pendientes</dt><dd id="pending">—</dd>
+        <dt>Último error</dt><dd id="error">Ninguno</dd>
+      </dl>
     </section>
-    <section class="update">
-      <h2>Actualizaciones</h2>
-      <p id="updateState">Comprobando…</p>
-      <small id="versions"></small>
-      <progress id="updateProgress" value="0" max="100" hidden style="width:100%;margin-top:10px"></progress>
-      <ol id="installPhases" hidden></ol>
-      <p id="releaseNotes"></p>
-      <p id="lastAttempt" hidden></p>
-      <button id="installUpdate" hidden>Instalar actualización</button>
-      <button class="secondary" id="openLog" hidden>Ver registro</button>
+
+    <section role="tabpanel" id="panel-actualizaciones" aria-labelledby="tab-actualizaciones" hidden>
+      <dl style="margin-bottom:14px">
+        <dt>POS instalado</dt><dd id="posInstalled">—</dd>
+        <dt>Visor instalado</dt><dd id="visorInstalled">—</dd>
+        <dt>Disponible</dt><dd id="availableVersions">—</dd>
+        <dt>Modo de la versión disponible</dt><dd id="availableMode">—</dd>
+        <dt>Versión en la nube</dt><dd id="cloudVersion">—</dd>
+        <dt>Actualización en la nube</dt><dd id="cloudUpdate">—</dd>
+        <dt>Actualizador de esta caja</dt><dd id="updaterFeatures">—</dd>
+      </dl>
+      <div class="card">
+        <h2>Historial de instalaciones</h2>
+        <div id="historyEmpty" class="muted">Todavía no hay intentos registrados en esta caja.</div>
+        <table id="historyTable" hidden>
+          <thead><tr><th>Fecha</th><th>Versión</th><th>Resultado</th></tr></thead>
+          <tbody id="historyRows"></tbody>
+        </table>
+      </div>
     </section>
-    <div class="actions">
-      <button id="refresh">Buscar actualización</button>
-      <button class="secondary" id="diagnostics">Ver diagnóstico</button>
+
+    <section role="tabpanel" id="panel-tiendas" aria-labelledby="tab-tiendas" hidden>
+      <div class="card">
+        <h2>Tiendas en esta caja</h2>
+        <div id="profileList">Cargando perfiles…</div>
+      </div>
+      <div class="card">
+        <h2>Agregar una tienda</h2>
+        <div class="enroll">
+          <select id="newProfile" aria-label="Tienda"></select>
+          <input id="enrollmentCode" autocomplete="one-time-code" placeholder="Código de enrolamiento" aria-label="Código de enrolamiento">
+          <button id="enrollProfile">Agregar</button>
+        </div>
+        <div id="profileMessage"></div>
+      </div>
+    </section>
+
+    <section role="tabpanel" id="panel-soporte" aria-labelledby="tab-soporte" hidden>
+      <div class="card">
+        <h2>Para pedir ayuda</h2>
+        <p>Copia el diagnóstico y pégalo en el mensaje a soporte. Incluye versiones, estado de Docker, de la nube y de las actualizaciones; no incluye ventas ni contraseñas.</p>
+        <div class="actions">
+          <button id="copyDiagnostics">Copiar diagnóstico</button>
+          <button class="secondary" id="diagnostics">Ver diagnóstico</button>
+        </div>
+        <div id="supportMessage"></div>
+        <pre id="output"></pre>
+      </div>
+      <div class="card">
+        <h2>Registros</h2>
+        <p>Los registros guardan lo que hizo el visor y cada instalación.</p>
+        <div class="actions">
+          <button class="secondary" id="openPosLogs">Abrir registros del POS</button>
+          <button class="secondary" id="openVisorLogs">Abrir registros del visor</button>
+        </div>
+      </div>
+    </section>
+
+    <section role="tabpanel" id="panel-atajos" aria-labelledby="tab-atajos" hidden>
+      <div class="card">
+        <h2>Al vender</h2>
+        <table>
+          <tbody>
+            <tr><td><kbd>F4</kbd></td><td>Terminar la venta y abrir el cobro. Con el cobro abierto y el pago completo, finaliza.</td></tr>
+            <tr><td><kbd>F2</kbd></td><td>Ir a las acciones de la caja. En el cobro, elegir la forma de pago.</td></tr>
+            <tr><td><kbd>F1</kbd></td><td>En el cobro, quitar el último pago agregado.</td></tr>
+            <tr><td><kbd>Enter</kbd></td><td>En el cobro, pasar al siguiente campo y agregar el pago.</td></tr>
+            <tr><td><kbd>Esc</kbd></td><td>Cerrar el cobro. Con el cursor en el código y sin ventanas abiertas, cancelar la venta.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h2>De Terrones POS</h2>
+        <table>
+          <tbody>
+            <tr><td><kbd>F9</kbd></td><td>Abrir esta ventana de estado.</td></tr>
+            <tr><td><kbd>F7</kbd></td><td>Buscar imágenes de un producto en internet.</td></tr>
+            <tr><td><kbd>F8</kbd></td><td>Herramientas de desarrollador (para soporte).</td></tr>
+            <tr><td><kbd>F12</kbd></td><td>Cerrar Terrones POS.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="actions" style="justify-content:flex-end">
       <button class="secondary" id="close">Cerrar</button>
     </div>
-    <pre id="output"></pre>
   </main>
   <script src="status.js"></script>
 </body>

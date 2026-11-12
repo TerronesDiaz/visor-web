@@ -57,10 +57,56 @@ app.whenReady().then(async () => {
   assert.equal(await host.loadPos(url), true, JSON.stringify(errors));
   assert.equal(await host.loadPos(`${url}/no-frames`), true, JSON.stringify(errors));
   assert.equal(host.isPreparing(), false);
+  // The status window (F9) and the automatic-update prompt, with the real preload.
+  const viewErrors = [];
+  const openView = async (file, size) => {
+    const view = new BrowserWindow({ ...size, show: false, webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true, preload: path.join(root, 'preload.js') } });
+    view.webContents.on('console-message', (event) => { if (event.level === 'error') viewErrors.push(`${file}: ${event.message}`); });
+    await view.loadFile(path.join(root, 'vistas', file));
+    await delay(500);
+    return view;
+  };
+  const closed = (view) => Promise.race([new Promise(resolve => view.once('closed', () => resolve(true))), delay(3000).then(() => false)]);
+  let autoAnswer = null;
+  ipcMain.handle('support:summary', () => ({
+    posReady: true, printing: { running: true, printerConfigured: true, printer: 'Impresora de prueba' },
+    backup: { at: new Date().toISOString(), tier: 'daily' }, updaterFeatures: ['visor-abierto', 'recuperacion', 'ligera'], logs: {},
+  }));
+  ipcMain.handle('update:auto-info', () => ({ key: 'k', seconds: 60, version: 'Terrones POS 2026.11.12.1', notes: 'Notas de prueba', light: true, visor: false }));
+  ipcMain.handle('update:auto-respond', (_event, answer) => { autoAnswer = answer; return { postponed: true }; });
+  status = {
+    state: 'ready', sync: { state: 'up_to_date', message: 'Nube al día', updatedAt: new Date().toISOString(), replicaLagSeconds: 0, pendingMedia: 0 },
+    profiles: [{ active: true, displayName: 'Tienda de prueba' }],
+    updates: {
+      state: 'ready', message: 'Hay una actualización lista para instalar.', installed: { pos: '2026.11.11.1', visor: '3.3.0' },
+      available: { pos: '2026.11.12.1', visor: null }, key: '2026.11.12.1|', mode: 'auto', light: true, auto: { attempts: 0, blocked: null },
+      canInstall: true, notes: 'Notas de prueba', progress: {}, lastAttempt: null, history: [],
+    },
+  };
+  const statusView = await openView('status.html', { width: 820, height: 720 });
+  const statusText = await statusView.webContents.executeJavaScript('document.body.innerText');
+  for (const expected of ['Operativa', 'Tienda de prueba', 'Automática', 'Ligera', 'Impresora de prueba', 'Instalar ahora']) {
+    assert.ok(statusText.includes(expected), `The status window is missing "${expected}": ${statusText}`);
+  }
+  assert.equal(await statusView.webContents.executeJavaScript(
+    "document.getElementById('tab-atajos').click(); !document.getElementById('panel-atajos').hidden && document.getElementById('panel-resumen').hidden"), true);
+  fs.writeFileSync(path.join(output, 'status.png'), (await statusView.webContents.capturePage()).toPNG());
+  const statusClosed = closed(statusView);
+  await statusView.webContents.executeJavaScript("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'F9', bubbles: true })); true");
+  assert.equal(await statusClosed, true, 'F9 must close the status window');
+
+  const promptView = await openView('auto-update.html', { width: 520, height: 400 });
+  assert.match(await promptView.webContents.executeJavaScript('document.body.innerText'), /Se instalará sola en \d+ s\./);
+  await promptView.webContents.executeJavaScript("document.getElementById('postpone').click(); true");
+  await delay(200);
+  assert.equal(autoAnswer, 'snooze');
+  promptView.destroy();
+  assert.deepEqual(viewErrors, []);
+
   const closing = host.loadPos(`${url}/slow`);
   host.window.close();
   assert.equal(await closing, false);
-  fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ ok: true, singleWindow: true, maximized: true, retry: true, closeDuringLoad: true, moduleRoot: root }, null, 2));
+  fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ ok: true, singleWindow: true, maximized: true, retry: true, statusWindow: true, autoPrompt: true, closeDuringLoad: true, moduleRoot: root }, null, 2));
   clearTimeout(deadline); server.close(); app.exit(0);
 }).catch(error => {
   fs.writeFileSync(path.join(output, 'result.json'), JSON.stringify({ ok: false, error: error.stack }, null, 2));

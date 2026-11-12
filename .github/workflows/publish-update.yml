@@ -66,6 +66,9 @@ jobs:
           $notesFile = "docs/releases/$version.md"
           if (-not (Test-Path -LiteralPath $notesFile)) { throw "Falta $notesFile." }
           if (-not $env:TERRONES_UPDATE_SIGNING_PRIVATE_XML) { throw 'Falta la clave de firma.' }
+          # Falla antes de construir si la línea "Instalación:" de las notas está mal escrita.
+          $installMode = node scripts/Sign-TerronesUpdateFeed.js --install-mode $notesFile
+          if ($LASTEXITCODE -ne 0 -or $installMode -notin @('auto','manual')) { throw 'Las notas no indican un modo de instalación válido.' }
           npm ci
           if ($LASTEXITCODE -ne 0) { throw 'Fallo al instalar dependencias.' }
           npm test
@@ -85,7 +88,8 @@ jobs:
           $paragraph = Get-Content -LiteralPath $notesFile -Encoding UTF8 | Select-Object -Skip 1 | Where-Object { $_.Trim() } | Select-Object -First 1
           $feedNotes = (-join ($paragraph.Normalize([Text.NormalizationForm]::FormD).ToCharArray() | Where-Object { [int]$_ -lt 128 })).Trim()
           if (-not $feedNotes) { throw 'Las notas del release están vacías.' }
-          node scripts/Sign-TerronesUpdateFeed.js $setup.FullName feed $feedNotes
+          node scripts/Sign-TerronesUpdateFeed.js $setup.FullName feed $feedNotes $installMode
+          if ($LASTEXITCODE -ne 0) { throw 'No se pudo firmar el feed del visor.' }
           Copy-Item feed/* upload/feed/
           tar.exe -cf artifacts/gateway-release.tar -C upload feed
       - name: Publish private GitHub release
