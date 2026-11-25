@@ -3,7 +3,7 @@ const fs = require('fs');
 const http = require('http');
 const path = require('path');
 const profiles = require('./profile-store');
-const { configureDockerBackground } = require('./docker-settings');
+const { configureDockerBackground, disableDockerLoginStartup } = require('./docker-settings');
 
 const LOCAL_URL = 'http://127.0.0.1:8080';
 const DOCKER_START_TIMEOUT_MS = 180000;
@@ -42,18 +42,44 @@ async function dockerReady() {
   catch (_) { return false; }
 }
 
+// Docker Desktop arrancando (por ejemplo, abierto por Windows al iniciar sesión)
+// todavía no responde a `docker version`, pero ya tiene su proceso.
+async function dockerDesktopRunning() {
+  for (const image of ['Docker Desktop.exe', 'com.docker.backend.exe']) {
+    try {
+      const { stdout } = await execFileAsync('tasklist.exe', ['/FI', `IMAGENAME eq ${image}`, '/FO', 'CSV', '/NH'], { timeout: 10000 });
+      if (stdout.toLowerCase().includes(`"${image.toLowerCase()}"`)) return true;
+    } catch (_) {}
+  }
+  return false;
+}
+
+async function preventDockerWindowAtLogin() {
+  try { await disableDockerLoginStartup((file, args) => execFileAsync(file, args, { timeout: 10000 })); }
+  catch (_) { /* Solo evita la ventana en el próximo inicio; nunca bloquea la venta. */ }
+}
+
 async function ensureDocker(report) {
-  if (await dockerReady()) return;
+  if (await dockerReady()) { await preventDockerWindowAtLogin(); return; }
   if (!findDockerDesktop()) throw new Error('Docker Desktop no está instalado. Ejecuta de nuevo el instalador de Terrones POS.');
-  configureDockerBackground();
+  await preventDockerWindowAtLogin();
   report({ phase: 'docker', state: 'starting', message: 'Iniciando servicios…' });
-  try {
-    await execFileAsync('docker.exe', ['desktop', 'start', '--detach'], { timeout: 15000 });
-  } catch (error) {
-    throw new Error(`No fue posible iniciar los servicios en segundo plano. Revisa o actualiza Docker Desktop. ${error.stderr || error.message}`);
+  let startError = null;
+  // Si Windows ya lo está abriendo, otra orden de inicio falla: basta con esperarlo.
+  if (!await dockerDesktopRunning()) {
+    configureDockerBackground();
+    try {
+      await execFileAsync('docker.exe', ['desktop', 'start', '--detach'], { timeout: 15000 });
+    } catch (error) {
+      // La orden puede fallar o tardar aunque Docker sí esté arrancando: se espera igual.
+      startError = error;
+    }
   }
   const deadline = Date.now() + DOCKER_START_TIMEOUT_MS;
   while (Date.now() < deadline) { if (await dockerReady()) return; await delay(3000); }
+  if (startError) {
+    throw new Error(`No fue posible iniciar los servicios en segundo plano. Revisa o actualiza Docker Desktop. ${startError.stderr || startError.message}`);
+  }
   throw new Error('Docker Desktop no respondió en tres minutos. Revisa WSL2 y vuelve a intentar.');
 }
 
