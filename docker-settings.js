@@ -23,4 +23,19 @@ function configureDockerBackground(appData = process.env.APPDATA) {
   }
 }
 
-module.exports = { configureDockerBackground };
+const RUN_KEY = 'HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run';
+const RUN_VALUE = 'Docker Desktop';
+
+// Docker Desktop se registra en Run para abrirse al iniciar sesión, con su ventana
+// al frente, aunque su opción AutoStart diga lo contrario. En la caja el visor es
+// quien lo inicia (oculto, con `docker desktop start --detach`), así que se quita
+// esa entrada. Solo afecta al usuario actual y se puede hacer con Docker abierto.
+// `run(file, args)` devuelve una promesa; rechaza cuando el comando falla.
+async function disableDockerLoginStartup(run) {
+  try { await run('reg.exe', ['query', RUN_KEY, '/v', RUN_VALUE]); }
+  catch (_) { return false; }
+  await run('reg.exe', ['delete', RUN_KEY, '/v', RUN_VALUE, '/f']);
+  return true;
+}
+
+module.exports = { configureDockerBackground, disableDockerLoginStartup };
